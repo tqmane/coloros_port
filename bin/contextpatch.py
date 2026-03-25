@@ -81,7 +81,7 @@ def scan_context(file) -> dict:  # 读取context文件返回一个字典
             filepath = filepath.replace(r"\@", "@")
             context[filepath] = other
             if len(other) > 1:
-                print(f"[Warn] {i[0]} has too much data.Skip.")
+                print(f"[Warn] {filepath} has too much data. Skip.")
                 del context[filepath]
     return context
 
@@ -105,8 +105,8 @@ def scan_dir(folder) -> Generator[Any, Any, Any]:  # 读取解包的目录，返
             yield os.path.join(root, file).replace(folder, "/" + part_name).replace(
                 "\\", "/"
             )
-        for rv in allfiles:
-            yield rv
+    for rv in allfiles:
+        yield rv
 
 
 def str_to_selinux(string: str):
@@ -176,8 +176,8 @@ def context_patch(fs_file, dir_path) -> tuple:  # 接收两个字典对比
                             break
                         else:
                             permission = permission_d
-            if " " in permission:
-                permission = permission.replace(" ", "")
+            if permission and any(" " in p for p in permission):
+                permission = [p.replace(" ", "") for p in permission]
             print(f"Add {i} {permission}")
             add_new += 1
             r_new_fs[i] = permission
@@ -206,11 +206,11 @@ if __name__ == "__main__":
     if len(sys.argv) < 3:
         Usage()
         sys.exit()
-    if os.path.isdir(sys.argv[1]) or os.path.isfile(sys.argv[2]):
+    if os.path.isdir(sys.argv[1]) and os.path.isfile(sys.argv[2]):
         main(sys.argv[1], sys.argv[2])
         print("Done!")
     else:
         print(
-            "The path or filetype you have given may wrong, please check it wether correct."
+            "The path or filetype you have given may wrong, please check it whether correct."
         )
         Usage()

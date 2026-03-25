@@ -10,12 +10,12 @@ def scanfs(file) -> dict:
         for i in file_.readlines():
             try:
                 filepath, *other = i.strip().split()
-            except Exception or BaseException:
+            except (Exception, BaseException):
                 print(f"[W] Skip {i}")
                 continue
             filesystem_config[filepath] = other
             if (long := len(other)) > 4:
-                print(f"[W] {i[0]} has too much data-{long}.")
+                print(f"[W] {filepath} has too much data-{long}.")
     return filesystem_config
 
 
@@ -42,8 +42,8 @@ def scan_dir(folder) -> list:
             yield os.path.join(root, file).replace(
                 folder, os.path.basename(folder)
             ).replace("\\", "/")
-        for rv in allfiles:
-            yield rv
+    for rv in allfiles:
+        yield rv
 
 
 def islink(file) -> str:
@@ -169,7 +169,7 @@ if __name__ == "__main__":
     if len(sys.argv) < 3:
         Usage()
         sys.exit()
-    if os.path.isdir(sys.argv[1]) or os.path.isfile(sys.argv[2]):
+    if os.path.isdir(sys.argv[1]) and os.path.isfile(sys.argv[2]):
         main(sys.argv[1], sys.argv[2])
         print("Done!")
     else:
