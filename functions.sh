@@ -175,8 +175,7 @@ is_property_exists () {
     fi
 }
 
-disable_avb_verify() {
-    fstab=$(find $1 -name "fstab*")
+extract_partition() {
     part_img=$1
     part_name=$(basename ${part_img})
     target_dir=$2
