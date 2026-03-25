@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import os
 import sys
@@ -29,7 +29,7 @@ if __name__ == "__main__":
     magic = os.read(fd, AVB_MAGIC_LEN)
 
     if magic != AVB_MAGIC:
-        fd.close()
+        os.close(fd)
         sys.exit("Error: The provided image is not a valid vbmeta image.\nFile not modified. Exiting...")
 
     # set the disable-verity and disable-verification flags at offset 123
@@ -37,7 +37,7 @@ if __name__ == "__main__":
         os.lseek(fd, FLAGS_OFFSET, os.SEEK_SET)
         os.write(fd, FLAGS_TO_SET)
     except OSError:
-        fd.close()
+        os.close(fd)
         sys.exit("Error: Failed when patching the vbmeta image.\nExiting...")
 
     # end of program

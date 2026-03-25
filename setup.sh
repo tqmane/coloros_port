@@ -6,7 +6,6 @@ if [ "$(uname -m)" == "x86_64" ] && [  "$(uname)" == "Linux" ] && [ -f "/bin/apt
     if [ "$(id -u)" != "0" ] && [ "$(uname -m)" == "x86_64" ]  && [  "$(uname)" == "Linux" ];then
         echo "Restarting script as root"
         exec sudo /bin/bash "$0" "$@"
-        exit $?
     fi
     echo "Device arch: Linux x86_64 (Debian based distro)"
     apt update -y
@@ -32,15 +31,13 @@ if [ "$(uname -m)" == "aarch64" ];then
     if [ "$(id -u)" != "0" ] && [ "$(uname)" == "Linux" ];then
         echo "Restarting script as root"
         exec sudo /bin/bash "$0" "$@"
-        exit $?
     fi
     apt update -y
     apt upgrade -y
-    apt install -y python busybox zip unzip p7zip openjdk-21 zipalign zstd xmlstarlet
+    apt install -y python3 busybox zip unzip p7zip openjdk-21 zipalign zstd xmlstarlet
 fi
 
 if [ "$(uname)" == "Darwin" ] && [ "$(uname -m)" == "x86_64" ];then
     echo "Device arch: macOS x86_64"
-    pip3 install busybox
     brew install aria2 openjdk zstd coreutils gdu gnu-sed gnu-getopt grep xmlstarlet
 fi
