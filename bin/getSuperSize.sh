@@ -8,7 +8,7 @@ case $device_code in
 	OP4E5D | OnePlus9 | OnePlus9Pro) size=11190403072;;
         #Oppo Find X3 Pro
         OP4E3F) size=11186208768;;
-	RE54E4L1 | RMX3371) size=11274289152;;
+	RE54E4L1| RMX3371) size=11274289152;;
 	# Oplus ACE3V
 	OP5CFBL1) size=16106127360;; 
     #OP5CFBL1) size=16105078784;;
@@ -22,4 +22,4 @@ case $device_code in
 	#Others
 	*) size=15032385536;;
 esac
-echo "$size"
+echo $size

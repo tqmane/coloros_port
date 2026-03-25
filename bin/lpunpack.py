@@ -141,7 +141,7 @@ class SparseHeader(object):
         (
             self.magic,             # 0xed26ff3a
             self.major_version,     # (0x1) - reject images with higher major versions
-            self.minor_version,     # (0x0) - allow images with higher minor versions
+            self.minor_version,     # (0x0) - allow images with higer minor versions
             self.file_hdr_sz,       # 28 bytes for first revision of the file format
             self.chunk_hdr_sz,      # 12 bytes for first revision of the file format
             self.blk_sz,            # block size in bytes, must be a multiple of 4 (4096)
@@ -745,7 +745,7 @@ class LpUnpack(object):
 
             if header.magic != LP_METADATA_HEADER_MAGIC:
                 check_index = index + 1
-                if check_index >= len(offsets):
+                if check_index > len(offsets):
                     raise LpUnpackError('Logical partition metadata has invalid magic value.')
                 else:
                     print(f'Read Backup header by offset 0x{offsets[check_index]:x}')
@@ -877,7 +877,7 @@ def create_parser():
         '-p',
         '--partition',
         dest='NAME',
-        type=lambda x: re.split(r"\W+", x),
+        type=lambda x: re.split("\W+", x),
         help='Extract the named partition. This can be specified multiple times or through the delimiter [","  ":"]'
     )
     _parser.add_argument(

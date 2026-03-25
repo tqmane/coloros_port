@@ -98,7 +98,7 @@ if [ -f "super.zst" ];then
 		else
 		    echo Conversion failed, exit the program after 2s
 		fi
-		sleep 2
+		ping 127.0.0.1 -c 2 1> /dev/null 2>&1
 		exit 0
 	fi
 fi
@@ -113,7 +113,7 @@ else
 	echo "Validating device...please boot your device into bootloader and make sure your device code is [device_code]"
 fi
 
-fastboot "$@" getvar product 2>&1 | grep "^product: *device_code"
+fastboot $* getvar product 2>&1 | grep "^product: *device_code"
 if [ $? -ne 0  ] ; then
 	if [ "$LANG" = "C.UTF-8" ];then
 		    echo 机型[device_code]校验失败，检查包是否匹配
@@ -131,7 +131,7 @@ fi
 
 fastboot erase super
 fastboot reboot bootloader
-sleep 5
+ping 127.0.0.1 -c 5 1> /dev/null 2>&1
 
 if [ -f "boot_tv.img" ]; then
 	fastboot flash boot_ab boot_tv.img
@@ -143,7 +143,7 @@ fi
 fastboot flash super super.img
 if [ ! -n "$input" ];then
 	echo
-elif [ "$input" = "2" ];then
+elif [ "$input" -eq "2" ];then
 	if [ "$LANG" = "C.UTF-8" ];then
 	    echo 正在双清系统,耐心等待
 	elif [ "$LANG" = "zh_CN.UTF-8" ];then
@@ -155,7 +155,7 @@ elif [ "$input" = "2" ];then
 	fi
 	fastboot erase userdata
 	fastboot erase metadata
-elif [ "$input" = "1" ];then
+elif [ "$input" -eq "1" ];then
 	echo
 fi
 # SET_ACTION_SLOT_A_BEGIN
@@ -182,4 +182,5 @@ elif [[ "$LANG" =~ ^zh_.*\.UTF-8$ ]]; then
 else
 	echo Flash completed. If the phone does not restart for an extended period, please manually restart. Press any key to exit.
 fi
+echo 若手机长时间未重启请手动重启
 exit 0

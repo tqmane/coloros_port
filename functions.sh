@@ -161,7 +161,7 @@ patch_smali() {
             fi
         fi
     else
-        error "Failed to find $1, please check it manually."
+        error "Failed to find $1,please check it manually".
     fi
 
 }
@@ -176,7 +176,20 @@ is_property_exists () {
 }
 
 disable_avb_verify() {
-    fstab=$(find $1 -name "fstab*")
+    fstab=$1
+    blue "Disabling avb_verify: $fstab"
+    if [[ ! -f $fstab ]]; then
+        yellow "$fstab not found, please check it manually"
+    else
+        sed -i "s/,avb_keys=.*avbpubkey//g" $fstab
+        sed -i "s/,avb=vbmeta_system//g" $fstab
+        sed -i "s/,avb=vbmeta_vendor//g" $fstab
+        sed -i "s/,avb=vbmeta//g" $fstab
+        sed -i "s/,avb//g" $fstab
+    fi
+}
+
+extract_partition() {
     part_img=$1
     part_name=$(basename ${part_img})
     target_dir=$2
@@ -883,7 +896,7 @@ fix_oldfaceunlock() {
         replace="    const-string $register, \"484,36:654,101\""
         sed -i "${lineNum},${lineNumEnd}d" "$MiniCapsuleManagerImplSmali"
         sed -i "${lineNum}i\\${replace}" "$MiniCapsuleManagerImplSmali"
-        echo "Patched $MiniCapsuleManagerImplSmali successfully"
+        echo "Patched $file successfully"
     else
         echo "No 'move-result-object' found after $findCode in $MiniCapsuleManagerImplSmali"
     fi

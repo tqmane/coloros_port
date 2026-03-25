@@ -6,9 +6,9 @@
 
 ## Supported Devices
 
-- OnePlus 8, OnePlus 8 Pro, OnePlus 8T, OnePlus 9R (CN)
-- OnePlus 9, OnePlus 9 Pro, OnePlus 9RT (regularly tested on the OnePlus 9 Pro)
-- Oppo Find X3, Oppo Find X3 Pro
+- OnePlus 8 OnePlus 8Pro OnePlus 8T OnePlus 9R(CN)
+- OnePlus 9 OnePlus 9Pro OnePlus 9RT (regularly tested on the OnePlus 9 Pro)
+- Oppo Find X3 Oppo Find X3 Pro
 
 ## Tested devices and port ROMs
 - Test Base ROM:  OnePlus 8T (ColorOS_14.0.0.600), OnePlus 8 (ColorOS_IN2010_13.1.190), OnePlus 8 Pro (ColorOS_IN2020_13.1.0.190), OnePlus 9 Pro (OxygenOS LE2123_14.0.0.600)
@@ -21,14 +21,14 @@
 - Camera
 - Automatic Brightness
 - NFC
-- etc.
+- etc
 
 
 ## Bugs
 - AOD is too dim (SM8250)
 - Voice trigger is not working
 - Poweroff charging is not working
-- Wired earphone is not working
+- WiredEarphone is not working
 
 ## How to use
 - On Debian based distros:
@@ -37,7 +37,7 @@
     sudo apt upgrade
     sudo apt install git -y
     # Clone project
-    git clone https://github.com/tqmane/coloros_port.git
+    git clone https://github.com/blahajcoding/coloros_port.git
     cd coloros_port
     # Install dependencies
     ./setup.sh
@@ -49,21 +49,21 @@
     sudo pacman -Syu git # Always keep your computer up to date!
     # yay will automatically install if it's not on your system
     # Clone project
-    git clone https://github.com/tqmane/coloros_port.git
+    git clone https://github.com/blahajcoding/coloros_port.git
     cd coloros_port
     # Install dependencies
-    ./setup.sh
+    sudo ./setup.sh
     # Start porting
-    sudo ./port.sh <baserom> <portrom> [portrom2]
+    sudo ./port.sh <baserom> <portrom> <portrom2>
 ```
 - On other Linux based distros:
 ```shell
     # Install Distrobox. This can be done with your default package manager. If it doesn't work, install it with the following command:curl -s https://raw.githubusercontent.com/89luca89/distrobox/main/install | sudo sh
     # Start porting. All dependencies will be installed, and the script can be ran with root with this command.
-    ./port_containerised.sh <baserom> <portrom> [portrom2]
+    ./port_containerised.sh <baserom> <portrom> <portrom2>
 ``` 
 
-- baserom, portrom and portrom2 can be a direct download link. OTAs can be acquired from sources like [Daniel Springer's OTA downloader](https://roms.danielspringer.at/index.php?view=ota). If needed, downloadCheck links can be resolved for both portrom and portrom2.
+- baserom, portrom and portrom2 can be a direct download link. OTAs can be acquired from sources like [Daniel Springer's OTA downloader.](https://roms.danielspringer.at/index.php?view=ota). If needed, downloadCheck links can be resolved for both portrom and portrom2.
 
 ## Credits
 > In this project, some or all of the content is derived from the following open-source projects. Special thanks to the developers of these projects.

@@ -842,7 +842,7 @@ fi
 
 echo "ro.surface_flinger.game_default_frame_rate_override=120" >>  build/portrom/images/vendor/default.prop
 #Unlock AI Call
-targetAICallAssistant=$(find build/portrom/images/ -name "HeyTapSpeechAssist.apk")
+#targetAICallAssistant=$(find build/portrom/images/ -name "HeyTapSpeechAssist.apk")
 if [[ -f build/${app_patch_folder}/patched/HeyTapSpeechAssist.apk ]]; then
     blue "复制已经处理过的HeyTapSpeechAssist.apk"
     cp -rfv build/${app_patch_folder}/patched/HeyTapSpeechAssist.apk $targetAICallAssistant
@@ -897,7 +897,7 @@ fi
     [[ $regionmark != CN ]] && MODEL=CPH2745
 
     if [[ -f build/${app_patch_folder}/patched/AIUnit.apk ]]; then
-            blue "复制已经处理过的AIUnit.apk"
+            blue "复制已经处理过的OTA.apk"
             cp -rfv build/${app_patch_folder}/patched/AIUnit.apk $targetAIUnit
         
     elif [[ -f $targetAIUnit ]];then
@@ -989,7 +989,7 @@ if [[ ${base_device_family} == "OPSM8250" ]] || [[ ${base_device_family} == "OPS
     fi
 fi 
 
-if [[ ${regionmark} != "CN" ]] && [[ ${base_product_model} != IN20* ]];then
+if [[ ${regionmark} != "CN" ]] && [[ ${base_product_model} != "IN20*" ]];then
 
     # Charging info in Settings
     targetSettings=$(find build/portrom/images/ -name "Settings.apk")
@@ -2301,7 +2301,7 @@ if [[ $pack_method == "stock" ]];then
             cp -rf build/baserom/firmware-update out/target/product/${base_product_device}/
         elif find build/baserom/ -type f \( -name "*.elf" -o -name "*.mdn" -o -name "*.bin" \) | grep -q .; then
             for firmware in $(find build/baserom/ -type f \( -name "*.elf" -o -name "*.mdn" -o -name "*.bin" \));do
-                mv -fv $firmware out/target/product/${base_product_device}/firmware-update
+                mv  -rfv $firmware out/target/product/${base_product_device}/firmware-update
             done
             bootimg=$(find build/baserom/ -name "boot.img")
             dtboimg=$(find build/baserom/images -name "dtbo.img")

@@ -48,7 +48,7 @@ class ext4_struct(ctypes.LittleEndianStructure):
     def __setattr__(self, name, value):
         try:
             # Combining *_lo and *_hi fields
-            lo_field = ctypes.LittleEndianStructure.__getattribute__(type(self), name + "_lo")
+            lo_field = lo_field = ctypes.LittleEndianStructure.__getattribute__(type(self), name + "_lo")
             size = lo_field.size
 
             lo_field.__set__(self, value & ((1 << (8 * size)) - 1))
@@ -431,8 +431,8 @@ class MappingEntry:
         yield self.block_count
 
     def __repr__(self):
-        return "{type:s}({file_block_idx!r:s}, {disk_block_idx!r:s}, {block_count!r:s})".format(
-            block_count=self.block_count,
+        return "{type:s}({file_block_idx!r:s}, {disk_block_idx!r:s}, {blocK_count!r:s})".format(
+            blocK_count=self.block_count,
             disk_block_idx=self.disk_block_idx,
             file_block_idx=self.file_block_idx,
             type=type(self).__name__
@@ -526,7 +526,7 @@ class Volume:
         raw = self.read(offset, ctypes.sizeof(structure))
 
         if hasattr(structure, "_from_buffer_copy"):
-            return structure._from_buffer_copy(raw, platform64=platform64 if platform64 is not None else self.platform64)
+            return structure._from_buffer_copy(raw, platform64=platform64 if platform64 != None else self.platform64)
         else:
             return structure.from_buffer_copy(raw)
 
@@ -554,7 +554,7 @@ class Inode:
         return self.inode.i_size
 
     def __repr__(self):
-        if self.inode_idx is not None:
+        if self.inode_idx != None:
             return "{type_name:s}(inode_idx = {inode!r:s}, offset = 0x{offset:X}, volume_uuid = {uuid!r:s})".format(
                 inode=self.inode_idx,
                 offset=self.offset,
@@ -579,7 +579,7 @@ class Inode:
             7: "system.",
             8: "system.richacl"
         }
-        prefixes.update(prefix_override)
+        prefixes.update(prefixes)
 
         # Iterator over ext4_xattr_entry structures
         i = 0
@@ -601,11 +601,11 @@ class Inode:
 
             if xattr_entry.e_value_inum != 0:
                 # external xattr
-                xattr_inode = self.volume.get_inode(xattr_entry.e_value_inum, InodeType.FILE)
+                xattr_inode = self.volume.get_inode(xattr.e_value_inum, InodeType.FILE)
 
                 if not self.volume.ignore_flags and (xattr_inode.inode.i_flags & ext4_inode.EXT4_EA_INODE_FL) != 0:
                     raise Ext4Error(
-                        "Inode {value_inode:d} associated with the extended attribute {xattr_name!r:s} of inode {inode:d} is not marked as large extended attribute value.".format(
+                        "Inode {value_indoe:d} associated with the extended attribute {xattr_name!r:s} of inode {inode:d} is not marked as large extended attribute value.".format(
                             inode=self.inode_idx,
                             value_inode=xattr_inode.inode_idx,
                             xattr_name=xattr_name

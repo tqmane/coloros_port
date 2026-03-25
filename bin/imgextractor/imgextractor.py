@@ -132,7 +132,7 @@ def simg2img(path):
 class Extractor:
     def __init__(self):
         self.BASE_DIR_ = None
-        self.CONFIG_DIR = None
+        self.CONFING_DIR = None
         self.DIR = None
         self.FileName = ""
         self.OUTPUT_IMAGE_FILE = ""
@@ -204,8 +204,8 @@ class Extractor:
 
     def __ext4extractor(self):
         fs_config_file = self.FileName + '_fs_config'
-        special_symbols = '\\^$.|?*+(){}[]'
-        contexts = self.CONFIG_DIR + os.sep + self.FileName + "_file_contexts"
+        fuk_symbols = '\\^$.|?*+(){}[]'
+        contexts = self.CONFING_DIR + os.sep + self.FileName + "_file_contexts"
 
         def scan_dir(root_inode, root_path=""):
             for entry_name, entry_inode_idx, entry_type in root_inode.open_dir():
@@ -223,8 +223,8 @@ class Extractor:
                 for f, e in entry_inode.xattrs():
                     if f == 'security.selinux':
                         t_p_mkc = tmp_path
-                        for char_ in special_symbols:
-                            t_p_mkc = t_p_mkc.replace(char_, '\\' + char_)
+                        for fuk_ in fuk_symbols:
+                            t_p_mkc = t_p_mkc.replace(fuk_, '\\' + fuk_)
                         self.context.append(f"/{t_p_mkc} {e.decode('utf8')[:-1]}")
                     elif f == 'security.capability':
                         r = struct.unpack('<5I', e)
@@ -303,7 +303,7 @@ class Extractor:
                         finally:
                             ...
 
-        dir_my = self.CONFIG_DIR + os.sep
+        dir_my = self.CONFING_DIR + os.sep
         if not os.path.isdir(dir_my):
             os.makedirs(dir_my)
         self.__append(os.path.getsize(self.OUTPUT_IMAGE_FILE), dir_my + self.FileName + '_size.txt')
@@ -314,7 +314,7 @@ class Extractor:
             self.fs_config.insert(0, '/ 0 2000 0755' if dir_r == 'vendor' else '/ 0 0 0755')
             self.fs_config.insert(1, f'{dir_r} 0 2000 0755' if dir_r == 'vendor' else '/lost+found 0 0 0700')
             self.fs_config.insert(2 if dir_r == 'system' else 1, f'{dir_r} 0 0 0755')
-            self.__append('\n'.join(self.fs_config), self.CONFIG_DIR + os.sep + fs_config_file)
+            self.__append('\n'.join(self.fs_config), self.CONFING_DIR + os.sep + fs_config_file)
             if self.context:
                 self.context.sort()
                 for c in self.context:
@@ -368,10 +368,10 @@ class Extractor:
             os.path.basename(output_dir))
         self.OUTPUT_IMAGE_FILE = (os.path.realpath(os.path.dirname(target)) + os.sep) + os.path.basename(target)
         self.FileName = self.__out_name(os.path.basename(target), out=0)
-        if len(sys.argv) == 3:
-            self.CONFIG_DIR = sys.argv[2] + os.sep + 'config'
+        if sys.argv.__len__() == 3:
+            self.CONFING_DIR = sys.argv[2] + os.sep + 'config'
         else:
-            self.CONFIG_DIR = os.path.dirname(output_dir) + os.sep + 'config'
+            self.CONFING_DIR = os.path.dirname(output_dir) + os.sep + 'config'
         if target_type == 's_img':
             simg2img(target)
             target_type = 'img'
@@ -388,10 +388,10 @@ class Extractor:
 
 
 if __name__ == '__main__':
-    if len(sys.argv) == 3:
+    if sys.argv.__len__() == 3:
         Extractor().main(sys.argv[1], (sys.argv[2] + os.sep + os.path.basename(sys.argv[1]).split('.')[0]))
     else:
-        if len(sys.argv) == 2:
+        if sys.argv.__len__() == 2:
             if not os.path.isdir("out"):
                 os.makedirs("out")
             Extractor().main(sys.argv[1], "out" + os.sep + os.path.basename(sys.argv[1]).split('.')[0])

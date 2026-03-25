@@ -12,12 +12,12 @@ mkdir -p $tmp
 
 package_extract_file() {
   ui_print "- 正在刷写分区 $(echo $2 | cut -d '/' -f 6) "
-  unzip -p "$ZIPFILE" "$1" >"$2"
+  unzip -p "$ZIPFILE" $1 >$2
 }
 
 package_extract_zstd() {
   ui_print "- 正在刷写分区 $(echo $2 | cut -d '/' -f 6) "
-  unzip -p "$ZIPFILE" "$1" | /dev/tmp/META-INF/zstd -c -d >"$2"
+  unzip -p "$ZIPFILE" $1 | /dev/tmp/META-INF/zstd -c -d >$2
 }
 
 # Device check
@@ -25,7 +25,7 @@ supported=false
 ui_print "Checking device compatibility..."
 for i in 19805 20809 20828; do
   for prop in "ro.boot.prjname" "ro.boot.project_name"; do
-    if [ "$(getprop $prop)" = "$i" ]; then
+    if [ "$(getprop $prop)" == "$i" ]; then
       ui_print "- Supported Device detected"
       supported=true
       break 2
@@ -50,7 +50,7 @@ elif [ "$(getprop ro.boot.ddr_type | grep -i 1)" ]; then
   ddr5=true
   ui_print "- DDR5 RAM detected!"
 else  ui_print "- Could not detect RAM type. Flashing aborted!" 
-  exit 1
+  exit 0
 fi
 
 ui_print " "
