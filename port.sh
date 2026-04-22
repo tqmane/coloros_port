@@ -18,6 +18,11 @@ baserom="$1"
 portrom="$2"
 portrom2="$3"
 portparts="$4"
+# ユーザが引数をクォートしつつバックスラッシュ付きで渡した場合に対応
+# 例: "../OTA/SuperHybrid\ Flasher\ COS\ 16.0.7.200.zip"
+baserom="${baserom//\\ / }"
+portrom="${portrom//\\ / }"
+portrom2="${portrom2//\\ / }"
 work_dir=$(pwd)
 tools_dir=${work_dir}/bin/$(uname)/$(uname -m)
 globalise=false
@@ -26,7 +31,7 @@ export PATH=$(pwd)/bin/$(uname)/$(uname -m)/:$(pwd)/otatools/bin/:$PATH
 # Import functions
 source functions.sh
 
-check unzip aria2c 7z zip java python3 zstd bc xmlstarlet
+check unzip aria2c 7z zip java python3 zstd bc xmlstarlet simg2img lpunpack
 
 # 可在 bin/port_config 中更改
 port_partition=$(grep "partition_to_port" bin/port_config |cut -d '=' -f 2)
@@ -93,6 +98,8 @@ blue "正在检测ROM底包" "Validating BASEROM.."
 if unzip -l "${baserom}" | grep -q "payload.bin"; then
     baserom_type="payload"
     oplus_hex_nv_id=$(unzip -p "${baserom}" META-INF/com/android/metadata 2>/dev/null | grep "oplus_hex_nv_id=" | cut -d= -f2)
+elif unzip -l "${baserom}" | grep -Eq "(^|/| )super\.img$"; then
+    baserom_type="super"
 elif unzip -l "${baserom}" | grep -Eq "br$"; then
     baserom_type="br"
     oplus_hex_nv_id=$(unzip -p "${baserom}" META-INF/com/android/metadata 2>/dev/null | grep "oplus_hex_nv_id=" | cut -d= -f2)
@@ -125,6 +132,8 @@ echo $portrom2
 # 检测移植包类型
 if unzip -l "${portrom}" | grep -q "payload.bin"; then
     portrom_type="payload"
+elif unzip -l "${portrom}" | grep -Eq "(^|/| )super\.img$"; then
+    portrom_type="super"
 elif unzip -l "${portrom}" | grep -Eq "\.img$"; then
     portrom_type="img"
 else
@@ -138,7 +147,7 @@ if unzip -l "${portrom}" | grep -q "META-INF/com/android/metadata"; then
     version_name=$(unzip -p "${portrom}" META-INF/com/android/metadata 2>/dev/null | grep "version_name=" | cut -d= -f2)
     ota_version=$(unzip -p "${portrom}" META-INF/com/android/metadata 2>/dev/null | grep "ota_version=" | cut -d= -f2)
 else
-    version_name="$(basename ${portrom%.*})"
+    version_name="$(basename "${portrom%.*}" | tr ' ' '_')"
     ota_version="V16.0.0"
 fi
 
@@ -163,6 +172,9 @@ if [[ $mix_port == true ]];then
         green "第二个ROM初步检测通过" "ROM validation passed."
         portrom2_type="payload"
 	version_name2=$(unzip -p ${portrom2} META-INF/com/android/metadata | grep "version_name=" | cut -d = -f2)
+    elif unzip -l "${portrom2}" | grep -Eq "(^|/| )super\.img$"; then
+        portrom2_type="super"
+        version_name2="$(basename "${portrom2%.*}" | tr ' ' '_')"
     elif unzip -l "${portrom2}" | grep -Eq "\.img$"; then
         portrom2_type="img"
         version_name2="$(basename "${portrom2%.*}")"
@@ -228,6 +240,26 @@ elif [[ ${baserom_type} == 'br' ]]; then
     done
     green "底包 [new.dat.br] 分解完毕" "[new.dat.br] unpack complete."
 
+elif [[ ${baserom_type} == 'super' ]]; then
+    blue "检测到底包类型为 [super.img]" "Extracting BASEROM containing super.img"
+    mkdir -p build/baserom/images/ build/baserom/tmp/
+    # 只解压 img 文件（super.img + その他パーティション）
+    unzip -q -j -o "${baserom}" "*.img" -d build/baserom/tmp/ || \
+        error "解压底包时出错" "Extracting BASEROM error"
+    find build/baserom/tmp/ -type f -name "*.img" -exec mv -fv {} build/baserom/images/ \;
+    rm -rf build/baserom/tmp/
+
+    if [[ -f build/baserom/images/super.img ]]; then
+        blue "正在解包 super.img" "Unpacking super.img"
+        unpack_super build/baserom/images/super.img build/baserom/images/ || exit 1
+        rm -f build/baserom/images/super.img
+        green "super.img 解包完成" "super.img unpacked."
+    else
+        error "底包中未找到 super.img" "super.img not found in BASEROM"
+        exit 1
+    fi
+    green "底包 [super.img] 提取完毕" "[super.img] extracted."
+
 elif [[ ${baserom_type} == 'img' ]]; then
     blue "检测到底包类型为 [img]" "Extracting BASEROM containing .img files"
     mkdir -p build/baserom/images/
@@ -244,15 +276,45 @@ fi
 
 
 # ===== 提取移植包 =====
-if [[ -n ${version_name} ]] && [[ -d build/${version_name} ]]; then 
+# Consider the cache valid only if every partition requested via port_partition
+# is already extracted.  A leftover super.img or a missing partition indicates
+# a previous aborted run, and we must fall through to re-extract to avoid
+# silently missing system/system_ext/product images.
+IFS=',' read -ra PARTS <<< "$port_partition"
+cache_valid=false
+if [[ -n ${version_name} ]] && [[ -d build/${version_name} ]]; then
+    cache_valid=true
+    if [[ -f "build/${version_name}/super.img" ]]; then
+        cache_valid=false
+    else
+        for i in "${PARTS[@]}"; do
+            if [[ ! -f "build/${version_name}/${i}.img" ]]; then
+                cache_valid=false
+                break
+            fi
+        done
+    fi
+fi
+
+if [[ "${cache_valid}" == "true" ]]; then
     blue "检测到已存在解压的移植包cache文件夹 ${version_name}，从中复制" \
          "Cached ${version_name} folder detected, copying..."
-    IFS=',' read -ra PARTS <<< "$port_partition"
     for i in "${PARTS[@]}"; do
+        if [[ ! -f "build/${version_name}/${i}.img" ]]; then
+            yellow "cache missing [${i}.img], invalidating cache" \
+                   "cache missing [${i}.img], invalidating cache"
+            cache_valid=false
+            break
+        fi
         cp -rfv "build/${version_name}/${i}.img" build/portrom/images/
     done
+fi
 
-else
+if [[ "${cache_valid}" != "true" ]]; then
+    if [[ -n ${version_name} ]] && [[ -d build/${version_name} ]]; then
+        yellow "cache [${version_name}] 不完整 (super.img 残留或缺少分区)，重新解包" \
+               "Cache [${version_name}] is incomplete (leftover super.img or missing parts); re-extracting."
+    fi
     mkdir -p build/${version_name}/ build/portrom/images/
 
     if [[ ${portrom_type} == 'payload' ]]; then
@@ -260,6 +322,63 @@ else
         payload-dumper --partitions "${port_partition}" --out "build/${version_name}/" "${portrom}"
         cp -rfv build/${version_name}/*.img build/portrom/images/
         green "移植包 [payload.bin] 提取完毕" "[payload.bin] extracted."
+
+    elif [[ ${portrom_type} == 'super' ]]; then
+        blue "检测到移植包类型为 [super.img]" "Extracting PORTROM containing super.img"
+        IFS=',' read -ra PARTS <<< "$port_partition"
+
+        # まず zip 内の個別 .img を優先して抽出（COS_FILES_HERE / OOS_FILES_HERE 等のサブディレクトリを含む）
+        declare -a unzip_targets=("*super.img")
+        for part in "${PARTS[@]}"; do
+            unzip_targets+=("*/${part}.img" "${part}.img" \
+                            "*/${part}_a.img" "${part}_a.img" \
+                            "*/${part}_b.img" "${part}_b.img")
+        done
+        unzip -q -j -o "${portrom}" "${unzip_targets[@]}" -d "build/${version_name}/" 2>/dev/null || true
+
+        # _a/_b を正規化
+        for f in "build/${version_name}"/*_a.img; do
+            [[ -e "$f" ]] || continue
+            base=$(basename "$f" _a.img)
+            mv -f "$f" "build/${version_name}/${base}.img"
+        done
+        rm -f "build/${version_name}"/*_b.img
+
+        if [[ ! -f "build/${version_name}/super.img" ]]; then
+            error "移植包中未找到 super.img" "super.img not found in PORTROM"
+            exit 1
+        fi
+        blue "正在解包 super.img" "Unpacking super.img"
+        unpack_super "build/${version_name}/super.img" "build/${version_name}/" "${PARTS[*]}" || exit 1
+        # Sanity-check BEFORE we copy anything out. Otherwise a partial
+        # extraction would drag stale super.img / unrelated files into
+        # build/portrom/images and poison the downstream OTA build.
+        missing_parts=()
+        for p in "${PARTS[@]}"; do
+            [[ -f "build/${version_name}/${p}.img" ]] || missing_parts+=("${p}")
+        done
+        if (( ${#missing_parts[@]} > 0 )); then
+            yellow "cache [${version_name}] 现有文件:" "Cache [${version_name}] currently contains:"
+            ls -la "build/${version_name}/" >&2 || true
+            error "super.img 解包后仍缺少分区: ${missing_parts[*]}" \
+                  "Missing partitions after super.img unpack: ${missing_parts[*]}"
+            exit 1
+        fi
+        # Drop super.img from the cache *before* copying images into the
+        # working tree so the raw portrom super.img never leaks into
+        # build/portrom/images/ (it would otherwise be packed back into
+        # ab_partitions.txt / payload.bin as a separate "super" partition
+        # entry with a stale SHA256, causing payload-dumper pre-verify to
+        # fail on the generated OTA).
+        rm -f "build/${version_name}/super.img"
+        # Only copy the partitions we actually care about — this further
+        # guarantees that nothing besides real dynamic partitions ends up
+        # in build/portrom/images/.
+        for p in "${PARTS[@]}"; do
+            [[ -f "build/${version_name}/${p}.img" ]] && \
+                cp -fv "build/${version_name}/${p}.img" build/portrom/images/
+        done
+        green "移植包 [super.img] 提取完毕" "[super.img] extracted."
 
     elif [[ ${portrom_type} == 'img' ]]; then
         blue "检测到移植包类型为 [img]" "Extracting PORTROM containing .img files"
@@ -289,7 +408,23 @@ else
     fi
 fi
 
-if [[ -n ${version_name2} ]] && [[ -d build/${version_name2} ]];then 
+if [[ -n ${version_name2} ]] && [[ -d build/${version_name2} ]];then
+    # Same concern as for version_name: do not trust the cache if super.img is
+    # still around or required mix_port_part images are missing.
+    cache_valid2=true
+    if [[ -f "build/${version_name2}/super.img" ]]; then
+        cache_valid2=false
+    else
+        for i in "${mix_port_part[@]}"; do
+            if [[ ! -f "build/${version_name2}/${i}.img" ]]; then
+                cache_valid2=false
+                break
+            fi
+        done
+    fi
+fi
+
+if [[ -n ${version_name2} ]] && [[ -d build/${version_name2} ]] && [[ "${cache_valid2}" == "true" ]];then
     blue "检测到已存在解压的第二个移植包cache文件夹${version_name2}，从中复制" "cached ${version_name2} folder detected, copying"
     #IFS=',' read -ra PARTS <<< "$port_partition"  # 用逗号分割为数组
     for i in "${mix_port_part[@]}"; do
@@ -301,6 +436,10 @@ if [[ -n ${version_name2} ]] && [[ -d build/${version_name2} ]];then
         #fi
     done
 elif [[ -n ${version_name2} ]];then
+    if [[ -d build/${version_name2} ]]; then
+        yellow "cache [${version_name2}] 不完整，重新解包" \
+               "Cache [${version_name2}] is incomplete; re-extracting."
+    fi
     if [[ ${portrom2_type} == 'payload' ]]; then
         blue "正在提取移植包 [payload.bin]" "Extracting files from PORTROM [payload.bin]"
         mkdir -p build/${version_name2}/
@@ -308,6 +447,37 @@ elif [[ -n ${version_name2} ]];then
         for i in "${mix_port_part[@]}"; do
             cp -rfv build/${version_name2}/${i}.img build/portrom/images/
         done
+    elif [[ ${portrom2_type} == 'super' ]]; then
+        blue "检测到移植包2类型为 [super.img]" "Extracting PORTROM2 containing super.img"
+        mkdir -p "build/${version_name2}/"
+        IFS=',' read -ra PARTS <<< "$port_partition"
+
+        declare -a unzip_targets2=("*super.img")
+        for part in "${PARTS[@]}"; do
+            unzip_targets2+=("*/${part}.img" "${part}.img" \
+                             "*/${part}_a.img" "${part}_a.img" \
+                             "*/${part}_b.img" "${part}_b.img")
+        done
+        unzip -q -j -o "${portrom2}" "${unzip_targets2[@]}" -d "build/${version_name2}/" 2>/dev/null || true
+
+        for f in "build/${version_name2}"/*_a.img; do
+            [[ -e "$f" ]] || continue
+            base=$(basename "$f" _a.img)
+            mv -f "$f" "build/${version_name2}/${base}.img"
+        done
+        rm -f "build/${version_name2}"/*_b.img
+
+        if [[ ! -f "build/${version_name2}/super.img" ]]; then
+            error "移植包2中未找到 super.img" "super.img not found in PORTROM2"
+            exit 1
+        fi
+        unpack_super "build/${version_name2}/super.img" "build/${version_name2}/" "${PARTS[*]}" || exit 1
+        rm -f "build/${version_name2}/super.img"
+        for i in "${mix_port_part[@]}"; do
+            [[ -f "build/${version_name2}/${i}.img" ]] && \
+                cp -rfv "build/${version_name2}/${i}.img" build/portrom/images/
+        done
+        green "移植包2 [super.img] 提取完毕" "[super.img] extracted."
     elif [[ ${portrom2_type} == 'img' ]]; then
         blue "检测到移植包2类型为 [img]" "Extracting PORTROM containing .img files"
         # 将逗号分隔的分区名转为数组
@@ -2136,6 +2306,17 @@ for pname in ${super_list};do
             thisSize=$(du -sb build/portrom/images/${pname} |tr -cd 0-9)
         fi
         blue 以[$pack_type]文件系统打包[${pname}.img] "Packing [${pname}.img] with [$pack_type] filesystem"
+        # Ensure fs_config / file_contexts exist — extract.erofs may not emit them for every image,
+        # which previously caused fspatch/contextpatch/mkfs.erofs to fail for partitions such as my_product.
+        mkdir -p build/portrom/images/config
+        if [ ! -f build/portrom/images/config/${pname}_fs_config ]; then
+            yellow "未找到 [${pname}_fs_config]，将使用空模板生成" "[${pname}_fs_config] not found, creating empty template"
+            : > build/portrom/images/config/${pname}_fs_config
+        fi
+        if [ ! -f build/portrom/images/config/${pname}_file_contexts ]; then
+            yellow "未找到 [${pname}_file_contexts]，将使用空模板生成" "[${pname}_file_contexts] not found, creating empty template"
+            : > build/portrom/images/config/${pname}_file_contexts
+        fi
         python3 bin/fspatch.py build/portrom/images/${pname} build/portrom/images/config/${pname}_fs_config
         python3 bin/contextpatch.py build/portrom/images/${pname} build/portrom/images/config/${pname}_file_contexts
         #perl -pi -e 's/\\@/@/g' build/portrom/images/config/${pname}_file_contexts
@@ -2209,6 +2390,16 @@ if [[ $pack_method == "stock" ]];then
     for part in SYSTEM SYSTEM_EXT PRODUCT VENDOR ODM; do
         mkdir -p out/target/product/${base_product_device}/$part
     done
+    # Defensive: never let a leftover super.img (or empty-super placeholder)
+    # flow into target_files IMAGES/. If one does, ota_from_target_files will
+    # list "super" in ab_partitions.txt and embed its raw bytes + SHA256 into
+    # payload.bin. Any downstream modification of sub-partitions then makes the
+    # stored super SHA stale and payload-dumper reports
+    # "Pre-verify FAILED for 'super'". The actual super.img is (re)built later
+    # in the flashable-zip branch; the stock/OTA branch must use individual
+    # dynamic partitions only.
+    rm -fv build/portrom/images/super.img build/portrom/images/super_*.img 2>/dev/null || true
+    rm -fv build/baserom/images/super.img build/baserom/images/super_*.img 2>/dev/null || true
     mv -fv build/portrom/images/*.img out/target/product/${base_product_device}/IMAGES/
     if [[ -d build/baserom/firmware-update ]];then
         bootimg=$(find build/baserom/ -name "boot.img")
@@ -2344,17 +2535,98 @@ if [[ $pack_method == "stock" ]];then
     )
 
     for dir in "${!prop_paths[@]}"; do
-        prop_file=$(find "build/portrom/images/$dir" -type f -name "build.prop" -not -path "*/system_dlkm/*" -not -path "*/odm_dlkm/*" -print -quit)
+        prop_file=""
+        # Prefer the real build.prop that carries ro.build.fingerprint / ro.build.version.sdk
+        # (avoid picking stubs such as system/build.prop or nested system_dlkm prop).
+        # Search portrom first; fall back to baserom when the portrom dir has already
+        # been packed and removed, or never materialised in portrom.
+        for root in build/portrom/images build/baserom/images; do
+            [ -d "$root/$dir" ] || continue
+            while IFS= read -r f; do
+                if grep -qE "^ro\.(system\.)?build\.version\.sdk=" "$f" 2>/dev/null \
+                    || grep -qE "^ro\.(system\.)?build\.fingerprint=" "$f" 2>/dev/null; then
+                    prop_file="$f"
+                    break
+                fi
+            done < <(find "$root/$dir" -type f -name "build.prop" \
+                -not -path "*/system_dlkm/*" -not -path "*/odm_dlkm/*" 2>/dev/null)
+            [ -n "$prop_file" ] && break
+        done
+        # Last-resort: just take the first build.prop found.
+        if [ -z "$prop_file" ]; then
+            for root in build/portrom/images build/baserom/images; do
+                [ -d "$root/$dir" ] || continue
+                prop_file=$(find "$root/$dir" -type f -name "build.prop" \
+                    -not -path "*/system_dlkm/*" -not -path "*/odm_dlkm/*" 2>/dev/null \
+                    | head -n 1)
+                [ -n "$prop_file" ] && break
+            done
+        fi
         if [ -n "$prop_file" ]; then
             cp "$prop_file" "out/target/product/${base_product_device}/${prop_paths[$dir]}/"
+        else
+            yellow "未找到 [$dir] 的 build.prop" "build.prop for [$dir] not found"
         fi
     done
     target_folder=${rom_version#*_}
+    # ota_from_target_files requires `ro.build.fingerprint` and
+    # `ro.build.version.sdk` in SYSTEM/build.prop, but recent ColorOS/OnePlus
+    # ROMs only ship the partition-scoped aliases (`ro.system.build.*`).
+    # Synthesise the flat keys from the aliases so the tool is happy.
+    sys_prop="out/target/product/${base_product_device}/SYSTEM/build.prop"
+    if [ -s "$sys_prop" ]; then
+        add_alias() {
+            local flat_key="$1" alias_key="$2"
+            if ! grep -qE "^${flat_key}=" "$sys_prop"; then
+                local val
+                val=$(grep -E "^${alias_key}=" "$sys_prop" | head -n1 | cut -d= -f2-)
+                if [ -n "$val" ]; then
+                    echo "${flat_key}=${val}" >> "$sys_prop"
+                    yellow "SYSTEM/build.prop に ${flat_key} を追加" \
+                           "Added ${flat_key} alias to SYSTEM/build.prop"
+                fi
+            fi
+        }
+        add_alias "ro.build.fingerprint"          "ro\.system\.build\.fingerprint"
+        add_alias "ro.build.version.sdk"          "ro\.system\.build\.version\.sdk"
+        add_alias "ro.build.version.release"      "ro\.system\.build\.version\.release"
+        add_alias "ro.build.version.incremental"  "ro\.system\.build\.version\.incremental"
+        add_alias "ro.build.date.utc"             "ro\.system\.build\.date\.utc"
+        add_alias "ro.build.date"                 "ro\.system\.build\.date"
+        add_alias "ro.build.id"                   "ro\.system\.build\.id"
+        add_alias "ro.build.type"                 "ro\.system\.build\.type"
+        add_alias "ro.build.tags"                 "ro\.system\.build\.tags"
+        add_alias "ro.product.name"               "ro\.product\.system\.name"
+        add_alias "ro.product.device"             "ro\.product\.system\.device"
+        add_alias "ro.product.brand"              "ro\.product\.system\.brand"
+        add_alias "ro.product.model"              "ro\.product\.system\.model"
+        add_alias "ro.product.manufacturer"       "ro\.product\.system\.manufacturer"
+    fi
+    # Fail fast if the critical SYSTEM build.prop is still missing or
+    # incomplete — otherwise ota_from_target_files raises an opaque "couldn't
+    # find ro.build.fingerprint in build.prop" and still writes a badly-named
+    # zip.
+    if [ ! -s "$sys_prop" ] \
+        || ! grep -qE "^ro\.(system\.)?build\.version\.sdk=" "$sys_prop" \
+        || ! grep -qE "^ro\.(system\.)?build\.fingerprint=" "$sys_prop"; then
+        error "SYSTEM/build.prop 缺失或不完整，无法生成 OTA。请确认 system 分区是否正确解压" \
+              "SYSTEM/build.prop missing or incomplete; cannot generate OTA. Check that the system partition was extracted."
+        exit 1
+    fi
+    if [ -z "${port_rom_version}" ] || [ -z "${port_android_version}" ]; then
+        error "ROM 版本信息为空 (port_rom_version=${port_rom_version}, port_android_version=${port_android_version})，无法生成 OTA" \
+              "Empty ROM version info; cannot generate OTA."
+        exit 1
+    fi
     pushd otatools
     export PATH=$(pwd)/bin/:$PATH
     mkdir -p ${work_dir}/out/$target_folder
     ./bin/ota_from_target_files ${work_dir}/out/target/product/${base_product_device}/ ${work_dir}/out/${base_product_device}-ota_full-${port_rom_version}-user-${port_android_version}.0.zip
     popd
+    if [ ! -f "out/${base_product_device}-ota_full-${port_rom_version}-user-${port_android_version}.0.zip" ]; then
+        error "ota_from_target_files 生成 zip 失败" "ota_from_target_files did not produce the OTA zip."
+        exit 1
+    fi
     ziphash=$(md5sum out/${base_product_device}-ota_full-${port_rom_version}-user-${port_android_version}.0.zip |head -c 10)
     mv -f out/${base_product_device}-ota_full-${port_rom_version}-user-${port_android_version}.0.zip out/$target_folder/ota_full-${rom_version}-${port_product_model}-${pack_timestamp}-$regionmark-${portrom_version_security_patch}-${ziphash}.zip
 	blue "打包完成： out/$target_folder/ota_full-${rom_version}-${port_product_model}-${pack_timestamp}-$regionmark-${portrom_version_security_patch}-${ziphash}.zip"

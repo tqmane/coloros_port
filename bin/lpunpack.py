@@ -679,7 +679,7 @@ class LpUnpack(object):
         self._partition_name = kwargs.get('NAME')
         self._show_info = kwargs.get('SHOW_INFO', False)
         self._show_info_format = kwargs.get('SHOW_INFO_FORMAT', FormatType.TEXT)
-        self._slot_num = None
+        self._slot_num = kwargs.get('NUM') or 0
         self._fd: BinaryIO = open(kwargs.get('SUPER_IMAGE'), 'rb')
         self._out_dir = kwargs.get('OUTPUT_DIR', None)
 
@@ -734,7 +734,7 @@ class LpUnpack(object):
             yield data
 
     def _read_metadata_header(self, metadata: Metadata):
-        offsets = metadata.get_offsets()
+        offsets = metadata.get_offsets(self._slot_num)
         for index, offset in enumerate(offsets):
             self._fd.seek(offset, io.SEEK_SET)
             header = LpMetadataHeader(self._fd.read(cast(int, LpMetadataHeader.size)))
@@ -885,7 +885,7 @@ def create_parser():
         '--slot',
         dest='NUM',
         type=int,
-        help=' !!! No implementation yet !!! Slot number (default is 0).'
+        help='Slot number (default is 0).'
     )
 
     if sys.version_info >= (3, 9):

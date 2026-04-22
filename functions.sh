@@ -85,6 +85,164 @@ check() {
     done
 }
 
+# Unpack a super.img into individual *.img files inside $out_dir.
+# If $3 is given, it is a space-separated list of partition base names to
+# extract selectively (covers both A-only and V-AB naming). Otherwise all
+# partitions are extracted. Existing *.img files in $out_dir are preserved
+# (individual images extracted from the outer zip take precedence over what
+# is inside super.img). After extraction, any _a.img is renamed to the base
+# name and _b.img duplicates are removed.
+unpack_super() {
+    local super_path="$1"
+    local out_dir="$2"
+    local parts="$3"
+    local lpargs=()
+    local tmp_dir
+
+    if [[ ! -f "$super_path" ]]; then
+        error "super.img 未找到: $super_path" "super.img not found: $super_path"
+        return 1
+    fi
+    mkdir -p "$out_dir"
+
+    # Android sparse (magic 3aff26ed) を検出したら raw に変換
+    local magic
+    magic=$(head -c 4 "$super_path" | od -An -tx1 | tr -d ' \n')
+    if [[ "$magic" == "3aff26ed" ]]; then
+        blue "super.img が sparse 形式です。変換中..." "super.img is sparse, converting to raw..."
+        local raw_path="${super_path%.img}.raw.img"
+        if ! simg2img "$super_path" "$raw_path"; then
+            error "simg2img 失败" "simg2img failed"
+            return 1
+        fi
+        mv -f "$raw_path" "$super_path"
+        green "super.img を raw に変換しました" "super.img converted to raw."
+    fi
+
+    tmp_dir=$(mktemp -d "${out_dir}/.super_unpack.XXXXXX")
+
+    local py_lpunpack="${work_dir}/bin/lpunpack.py"
+
+    # Diagnostic probe: confirm the super.img is readable by lpunpack.py
+    # metadata parser. This exposes malformed/truncated super.img early
+    # instead of pretending extraction "succeeded" with zero files.
+    if ! python3 "$py_lpunpack" --info "$super_path" >/dev/null 2>"$tmp_dir/.info.err"; then
+        yellow "lpunpack.py --info 失败:" "lpunpack.py --info failed:"
+        sed -e 's/^/    /' "$tmp_dir/.info.err" >&2 || true
+    fi
+    rm -f "$tmp_dir/.info.err"
+
+    local -a py_pargs=()
+    if [[ -n "$parts" ]]; then
+        for p in $parts; do
+            # Skip partitions that were already extracted as standalone imgs
+            if [[ -f "$out_dir/${p}.img" ]]; then
+                yellow "跳过 super.img 中的 [${p}]（已存在）" "Skip [${p}] from super.img (already present)"
+                continue
+            fi
+            lpargs+=( -p "${p}" -p "${p}_a" )
+            py_pargs+=( -p "${p}" -p "${p}_a" )
+        done
+        if (( ${#lpargs[@]} == 0 )); then
+            rm -rf "$tmp_dir"
+            return 0
+        fi
+    fi
+
+    _super_has_output() {
+        compgen -G "$tmp_dir"/*.img >/dev/null 2>&1 || \
+        compgen -G "$tmp_dir"/*_a.img >/dev/null 2>&1 || \
+        compgen -G "$tmp_dir"/*_b.img >/dev/null 2>&1
+    }
+
+    # Check whether any requested partition is still missing. A partition is
+    # considered present if an image for it exists in either $out_dir (from the
+    # outer zip) or $tmp_dir (from a previous lpunpack attempt), in any of the
+    # base / _a / _b naming variants.
+    _super_missing_any() {
+        [[ -z "$parts" ]] && ! _super_has_output && return 0
+        local p
+        for p in $parts; do
+            if [[ -f "$out_dir/${p}.img" ]] \
+                || [[ -f "$tmp_dir/${p}.img" ]] \
+                || [[ -f "$tmp_dir/${p}_a.img" ]] \
+                || [[ -f "$tmp_dir/${p}_b.img" ]]; then
+                continue
+            fi
+            return 0
+        done
+        return 1
+    }
+
+    # Attempt 1: C lpunpack (selective)
+    if (( ${#lpargs[@]} > 0 )); then
+        blue "[unpack_super] 尝试 lpunpack (selective)" "[unpack_super] trying C lpunpack (selective)"
+        lpunpack "${lpargs[@]}" "$super_path" "$tmp_dir" 2>&1 | sed -e 's/^/    [lpunpack] /' || true
+    fi
+
+    # Attempt 2: C lpunpack (all)
+    if _super_missing_any; then
+        blue "[unpack_super] 尝试 lpunpack (all)" "[unpack_super] trying C lpunpack (all)"
+        lpunpack "$super_path" "$tmp_dir" 2>&1 | sed -e 's/^/    [lpunpack] /' || true
+    fi
+
+    # Attempts 3..N: python lpunpack.py, iterate over metadata slots. Some
+    # Oplus SuperHybrid super.img layouts keep the real payload in slot 1 (or
+    # later) while slot 0 only references stub partitions such as my_company.
+    # We try selective-then-all for each slot until every requested partition
+    # has been produced.
+    local slot
+    for slot in 0 1 2 3; do
+        _super_missing_any || break
+        if (( ${#py_pargs[@]} > 0 )); then
+            blue "[unpack_super] 尝试 lpunpack.py -S ${slot} (selective)" \
+                 "[unpack_super] trying lpunpack.py -S ${slot} (selective)"
+            python3 "$py_lpunpack" -S "$slot" "${py_pargs[@]}" "$super_path" "$tmp_dir" 2>&1 \
+                | sed -e "s/^/    [lpunpack.py -S ${slot}] /" || true
+        fi
+        _super_missing_any || break
+        blue "[unpack_super] 尝试 lpunpack.py -S ${slot} (all)" \
+             "[unpack_super] trying lpunpack.py -S ${slot} (all partitions)"
+        python3 "$py_lpunpack" -S "$slot" "$super_path" "$tmp_dir" 2>&1 \
+            | sed -e "s/^/    [lpunpack.py -S ${slot}] /" || true
+    done
+
+    unset -f _super_has_output _super_missing_any
+
+    if ! compgen -G "$tmp_dir/*.img" >/dev/null && ! compgen -G "$tmp_dir/*_a.img" >/dev/null; then
+        yellow "tmp_dir の内容:" "tmp_dir contents:"
+        ls -la "$tmp_dir" >&2 || true
+        error "super.img 解包失败（所有工具均未产出文件）" "Failed to unpack super.img (all tools produced no output)"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    # Normalise slot suffixes in temp dir: prefer _a, drop _b duplicates
+    for f in "$tmp_dir"/*_a.img; do
+        [[ -e "$f" ]] || continue
+        local base
+        base=$(basename "$f" _a.img)
+        mv -f "$f" "$tmp_dir/${base}.img"
+    done
+    rm -f "$tmp_dir"/*_b.img
+    # Drop zero-sized outputs (empty slots)
+    find "$tmp_dir" -maxdepth 1 -type f -name '*.img' -size 0 -delete 2>/dev/null || true
+
+    # Merge into out_dir without overwriting pre-existing images
+    for f in "$tmp_dir"/*.img; do
+        [[ -e "$f" ]] || continue
+        local name
+        name=$(basename "$f")
+        if [[ -f "$out_dir/$name" ]]; then
+            yellow "保留已存在的 [${name}]，丢弃 super.img 中的副本" "Keep existing [${name}], discard super.img copy"
+            rm -f "$f"
+        else
+            mv -f "$f" "$out_dir/$name"
+        fi
+    done
+    rm -rf "$tmp_dir"
+}
+
 shopt -s expand_aliases
 if [[ "$OSTYPE" == "darwin"* ]]; then
     yellow "检测到Mac，设置alias" "macOS detected,setting alias"
