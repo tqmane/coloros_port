@@ -618,7 +618,7 @@ target_device_family=$(< build/portrom/images/my_product/build.prop grep "ro.bui
 
 # Security Patch Date
 portrom_version_security_patch=$(< build/portrom/images/my_manifest/build.prop grep "ro.build.version.security_patch" |awk 'NR==1' |cut -d '=' -f 2 )
-port_oplusrom_version=$(< build/portrom/images/my_product/build.prop grep "ro.build.version.oplusrom.confidential" |awk 'NR==1' |cut -d '=' -f 2 )
+port_oplusrom_confidential_version=$(< build/portrom/images/my_product/build.prop grep "ro.build.version.oplusrom.confidential" |awk 'NR==1' |cut -d '=' -f 2 )
 
 #regionmark=$(< build/portrom/images/my_bigball/etc/region/build.prop grep "ro.vendor.oplus.regionmark" |awk 'NR==1' |cut -d '=' -f 2)
 regionmark=$(find build/portrom/images/ -name build.prop -exec grep -m1 "ro.vendor.oplus.regionmark=" {} \; -quit | cut -d '=' -f2)
@@ -653,6 +653,7 @@ portIsColorOS=false
 portIsRealmeUI=false
 
 port_oplusrom_version=$(get_oplusrom_version)
+
 
 if [[ "$port_brand" == "realme" ]];then
     portIsRealmeUI=true
@@ -1159,11 +1160,9 @@ if [[ ${base_device_family} == "OPSM8250" ]] || [[ ${base_device_family} == "OPS
     fi
 fi 
 
+targetSettings=$(find build/portrom/images/ -name "Settings.apk")
+
 if [[ ${regionmark} != "CN" ]] && [[ ${base_product_model} != IN20* ]];then
-
-    # Charging info in Settings
-    targetSettings=$(find build/portrom/images/ -name "Settings.apk")
-
     if [[ -f $targetSettings ]];then
         blue "Charging info in Settings"
         cp -rf $targetSettings tmp/$(basename $targetSettings).bak
@@ -1172,6 +1171,19 @@ if [[ ${regionmark} != "CN" ]] && [[ ${base_product_model} != IN20* ]];then
         python3 bin/patchmethod_v2.py $targetSmali isPreferenceSupport
         java -jar bin/apktool/APKEditor.jar b -f -i tmp/Settings -o $targetSettings $extra_args
     fi
+fi 
+
+if [[ ${regionmark} == "CN" ]] && [[ ${port_oplusrom_confidential_version} == "V16.1.0" ]];then
+    if [[ -f $targetSettings ]];then
+        blue "Forcing Settings to use 16.1.0 assets..."
+        cp -rf $targetSettings tmp/$(basename $targetSettings).bak
+        java -jar bin/apktool/APKEditor.jar d -f -i $targetSettings -o tmp/Settings $extra_args
+        targetSmali=$(find tmp -type f -name "AboutDeviceOtaUpdatePreference.smali")
+        python3 bin/patchmethod_v2.py $targetSmali isCurrentOSColorOS161Resources -return true
+        java -jar bin/apktool/APKEditor.jar b -f -i tmp/Settings -o $targetSettings $extra_args
+    fi
+    blue "Fixing mediaserver crashes"
+    unzip -o devices/common/16.1-mediaserver-fix.zip -d build/portrom/images/ 
 fi 
 
 targetOplusLauncher=$(find build/portrom/images/ -name "OplusLauncher.apk")
