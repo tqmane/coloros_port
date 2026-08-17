@@ -11,7 +11,7 @@ def replace_method_body(smali_path, method_name, new_body):
 
     if not match:
         print(f"----> Method '{method_name}' not found in {smali_path}")
-        return
+        return False
 
     start = match.group(1)
     end = match.group(3)
@@ -23,6 +23,7 @@ def replace_method_body(smali_path, method_name, new_body):
         f.write(content)
 
     print(f"----> Replaced body of method '{method_name}' in: {smali_path}")
+    return True
 
 
 STUB_METHOD = '''\
@@ -39,7 +40,7 @@ STUB_VOID = '''\
 def patch_method_in_file(smali_path, method_set, return_type="true"):
     if not os.path.isfile(smali_path):
         print(f"----> Ignore patch: \"{os.path.basename(smali_path)}\" not found")
-        return
+        return 0
 
     with open(smali_path, 'r') as f:
         smali = f.read()
@@ -56,8 +57,9 @@ def patch_method_in_file(smali_path, method_set, return_type="true"):
         overvalue = '-1'
     else:
         print("Error: Invalid return type specified.")
-        return
+        return 0
 
+    patch_count = 0
     for line in smali.splitlines():
         method_line = re.search(r'\.method\s+(?:(?:public|private)\s+)?(?:static\s+)?(?:final\s+)?([^\(]+)\(', line)
         if method_line:
@@ -74,6 +76,7 @@ def patch_method_in_file(smali_path, method_set, return_type="true"):
                 else:
                     patched += (STUB_METHOD % overvalue) + line + '\n'
                     print(f"----> patched method in {smali_path}: {method_name} => " + ('true' if overvalue == '1' else 'false'))
+                patch_count += 1
             else:
                 patched += line + '\n'
         else:
@@ -82,6 +85,7 @@ def patch_method_in_file(smali_path, method_set, return_type="true"):
 
     with open(smali_path, 'w') as f:
         f.write(patched)
+    return patch_count
 
 def search_and_hook(smali_dir, keyword_pattern, hook_line_template):
     """
@@ -93,6 +97,7 @@ def search_and_hook(smali_dir, keyword_pattern, hook_line_template):
     keyword_re = re.compile(keyword_pattern)
     move_result_re = re.compile(r'^\s*move-result\s+([vp]\d+)')
 
+    patch_count = 0
     for root, _, files in os.walk(smali_dir):
         for file in files:
             if not file.endswith('.smali'):
@@ -119,6 +124,7 @@ def search_and_hook(smali_dir, keyword_pattern, hook_line_template):
                         hook_line = hook_line_template.replace('reg', reg)
                         new_lines.append(hook_line + '\n')
                         modified = True
+                        patch_count += 1
                         found_keyword = False  # reset，避免多次插入
                         continue
 
@@ -128,11 +134,13 @@ def search_and_hook(smali_dir, keyword_pattern, hook_line_template):
                 with open(path, 'w', encoding='utf-8') as f:
                     f.writelines(new_lines)
                 print(f"----> Patched {path}")
+    return patch_count
 
 
 
 def search_and_patch(smali_dir, keywords, return_type="true", method_body=None):
     method_set = set()
+    patch_count = 0
     for root, _, files in os.walk(smali_dir):
         for file in files:
             if file.endswith(".smali"):
@@ -147,9 +155,16 @@ def search_and_patch(smali_dir, keywords, return_type="true", method_body=None):
                         method_set.add(method_name)
                         print(f"Found method '{method_name}' in file: {smali_path}")
                         if method_body:
-                            replace_method_body(smali_path, method_name, method_body)
+                            patch_count += int(
+                                replace_method_body(
+                                    smali_path, method_name, method_body
+                                )
+                            )
                         else:
-                            patch_method_in_file(smali_path, {method_name}, return_type)
+                            patch_count += patch_method_in_file(
+                                smali_path, {method_name}, return_type
+                            )
+    return patch_count
 
 def main():
     if len(sys.argv) < 2:
@@ -181,8 +196,9 @@ def main():
         keyword_pattern = sys.argv[key_index]
         hook_line_template = sys.argv[hook_index]
 
-        search_and_hook(smali_dir, keyword_pattern, hook_line_template)
-        return 0
+        return 0 if search_and_hook(
+            smali_dir, keyword_pattern, hook_line_template
+        ) else 1
 
     # ---------------------------
     # 处理 return 类型参数 (-return true|false|void)
@@ -229,8 +245,9 @@ def main():
             print("Error: Missing keywords after -k.")
             return 1
 
-        search_and_patch(smali_dir, keywords, return_type, method_body)
-        return 0
+        return 0 if search_and_patch(
+            smali_dir, keywords, return_type, method_body
+        ) else 1
 
     # ---------------------------
     # fallback 单文件模式
@@ -263,13 +280,17 @@ def main():
 
     if extra_method_body:
         # 使用直接提供的方法体字符串替换
-        replace_method_body(smali_path, method_name, extra_method_body)
+        success = replace_method_body(
+            smali_path, method_name, extra_method_body
+        )
     else:
         # 使用 return_type 生成 stub
-        patch_method_in_file(smali_path, {method_name}, return_type)
+        success = patch_method_in_file(
+            smali_path, {method_name}, return_type
+        )
 
-    return 0
+    return 0 if success else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

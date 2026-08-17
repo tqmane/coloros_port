@@ -20,7 +20,6 @@
 - Fingerprint
 - Camera
 - Automatic Brightness
-- NFC
 - etc.
 
 
@@ -29,6 +28,9 @@
 - Voice trigger is not working
 - Poweroff charging is not working
 - Wired earphone is not working
+- OnePlus 9 Pro NFC reader mode still requires a kernel/DTS fix when the kernel
+  enables both the ST21/ST54 and QTI NXP stacks or lacks the `nq-nci` regulator
+  entries.
 
 ## How to use
 - On Debian based distros:
@@ -42,7 +44,7 @@
     # Install dependencies
     ./setup.sh
     # Start porting
-    sudo ./port.sh <baserom> <portrom>
+    sudo ./port.sh "<baserom>" "<portrom>"
 ```
 - On Arch Linux based distros:
 ```shell
@@ -54,16 +56,38 @@
     # Install dependencies
     ./setup.sh
     # Start porting
-    sudo ./port.sh <baserom> <portrom> [portrom2]
+    sudo ./port.sh "<baserom>" "<portrom>" ["<portrom2>"]
 ```
 - On other Linux based distros:
 ```shell
     # Install Distrobox. This can be done with your default package manager. If it doesn't work, install it with the following command:curl -s https://raw.githubusercontent.com/89luca89/distrobox/main/install | sudo sh
     # Start porting. All dependencies will be installed, and the script can be ran with root with this command.
-    ./port_containerised.sh <baserom> <portrom> [portrom2]
+    ./port_containerised.sh "<baserom>" "<portrom>" ["<portrom2>"]
 ``` 
 
 - baserom, portrom and portrom2 can be a direct download link. OTAs can be acquired from sources like [Daniel Springer's OTA downloader](https://roms.danielspringer.at/index.php?view=ota). If needed, downloadCheck links can be resolved for both portrom and portrom2.
+- Always quote ROM paths that contain spaces.
+
+## Partition source safety
+
+The port script never copies discrete firmware from the port package. Boot,
+radio, bootloader, and other physical firmware partitions are preserved from
+the base device.
+
+For logical partitions, the script inspects the port ROM's `vendor` and `odm`.
+It keeps the complete port logical-partition stack only when both
+`ro.product.device` (when declared) and `ro.build.device_family` match the base. Otherwise it
+falls back to the base device stack and applies the legacy compatibility path.
+This distinction is important for hybrid packages whose `super.img` targets
+the base device while bundled flasher firmware targets a different phone.
+Kernel-module partitions are not taken from a newer port ROM when their kernel
+ABI differs from the base kernel.
+
+Targeted helper tests can be run with:
+
+```shell
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
+```
 
 ## Credits
 > In this project, some or all of the content is derived from the following open-source projects. Special thanks to the developers of these projects.

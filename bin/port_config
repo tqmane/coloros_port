@@ -1,5 +1,5 @@
 # 需要移植的分区
-partition_to_port=system,system_ext,product,my_product,my_engineering,my_stock,my_heytap,my_carrier,my_region,my_bigball,my_manifest,my_company,my_preload
+partition_to_port=system,system_ext,product,vendor,odm,my_product,my_engineering,my_stock,my_heytap,my_carrier,my_region,my_bigball,my_manifest,my_company,my_preload
 
 # 可能的super子分区列表
 possible_super_list=system system_ext vendor product my_product odm my_engineering vendor_dlkm system_dlkm my_stock my_heytap my_carrier my_region my_bigball my_manifest my_company my_preload
@@ -15,3 +15,6 @@ remove_data_encryption=false
 # Needed to manually extend super partition, in order to flash it successfully. 
 super_extended=false
 pack_method=stock
+# OEM/platform-signed APKs must not be modified without the matching private
+# key. Enabling this can make SystemUI lose signature permissions.
+patch_protected_oem_apks=false

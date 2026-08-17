@@ -4,3 +4,4 @@ build/
 devices/*/kernel.zip
 cache/
 /*.zip
+*.pyc

@@ -10,9 +10,13 @@ if [ "$(uname -m)" == "x86_64" ] && [  "$(uname)" == "Linux" ] && [ -f "/bin/apt
     echo "Device arch: Linux x86_64 (Debian based distro)"
     apt update -y
     apt upgrade -y
-    apt install -y aria2 python3 busybox zip unzip p7zip-full openjdk-21-jre zstd bc android-sdk-libsparse-utils xmlstarlet
+    apt install -y \
+        aria2 bc binutils busybox curl e2fsprogs erofs-utils git jq \
+        openjdk-21-jre p7zip-full python3 wget zip unzip zstd \
+        android-sdk-build-tools android-sdk-libsparse-utils xmlstarlet
     if [ $? -ne 0 ];then
-        echo "安装可能出错，请手动执行：apt install -y aria2 python3 busybox zip unzip p7zip-full openjdk-21-jre zstd bc xmlstarlet"
+        echo "依赖安装失败，请检查上面的 apt 错误后重试。"
+        exit 1
     fi
 fi
 
@@ -23,7 +27,9 @@ if [ "$(uname -m)" == "x86_64" ] && [  "$(uname)" == "Linux" ] && [ -f "/bin/pac
         sudo pacman -Sy --needed --noconfirm base-devel && git clone https://aur.archlinux.org/yay.git && cd yay && makepkg -si
         exit
     fi
-    yay -Sy --noconfirm --cleanafter --norebuild aria2 python3 busybox zip unzip 7zip jdk21-openjdk zstd bc android-sdk-build-tools xmlstarlet
+    yay -Sy --noconfirm --cleanafter --norebuild \
+        aria2 android-sdk-build-tools bc binutils busybox curl e2fsprogs \
+        erofs-utils git jq jdk21-openjdk python3 unzip wget xmlstarlet zip zstd 7zip
 fi
 
 if [ "$(uname -m)" == "aarch64" ];then
@@ -34,7 +40,9 @@ if [ "$(uname -m)" == "aarch64" ];then
     fi
     apt update -y
     apt upgrade -y
-    apt install -y python3 busybox zip unzip p7zip openjdk-21 zipalign zstd xmlstarlet
+    apt install -y \
+        aria2 bc binutils busybox curl e2fsprogs erofs-utils git jq \
+        openjdk-21-jre p7zip python3 wget zip unzip zipalign zstd xmlstarlet
 fi
 
 if [ "$(uname)" == "Darwin" ] && [ "$(uname -m)" == "x86_64" ];then

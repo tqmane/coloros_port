@@ -11,79 +11,128 @@
 # Test Port ROM: OnePlus 12 (ColorOS_14.0.0.810), OnePlus ACE3V(ColorOS_14.0.1.621) Realme GT Neo5 240W(RMX3708_14.0.0.800)
 
 build_user="Juniper"
-build_host=$(hostname)"@lemonadeports"
+build_host="$(hostname)@lemonadeports"
 
-# 底包和移植包为外部参数传入
-baserom="$1"
-portrom="$2"
-portrom2="$3"
-portparts="$4"
-# ユーザが引数をクォートしつつバックスラッシュ付きで渡した場合に対応
-# 例: "../OTA/SuperHybrid\ Flasher\ COS\ 16.0.7.200.zip"
-baserom="${baserom//\\ / }"
-portrom="${portrom//\\ / }"
-portrom2="${portrom2//\\ / }"
-work_dir=$(pwd)
-tools_dir=${work_dir}/bin/$(uname)/$(uname -m)
+invocation_dir=$(pwd -P)
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+
+resolve_rom_argument() {
+    local value="${1//\\ / }"
+    if [[ -z "$value" || "$value" =~ ^https?:// || "$value" = /* ]]; then
+        printf '%s\n' "$value"
+    else
+        printf '%s/%s\n' "$invocation_dir" "$value"
+    fi
+}
+
+baserom=$(resolve_rom_argument "${1:-}")
+portrom=$(resolve_rom_argument "${2:-}")
+portrom2=$(resolve_rom_argument "${3:-}")
+portparts="${4:-}"
+
+cd "$script_dir" || {
+    printf 'Unable to enter repository directory: %s\n' "$script_dir" >&2
+    exit 1
+}
+
+work_dir="$script_dir"
+tools_dir="${work_dir}/bin/$(uname)/$(uname -m)"
 globalise=false
-export PATH=$(pwd)/bin/$(uname)/$(uname -m)/:$(pwd)/otatools/bin/:$PATH
+export PATH="${tools_dir}:${work_dir}/otatools/bin:${PATH}"
 
 # Import functions
-source functions.sh
+source "${work_dir}/functions.sh"
+source "${work_dir}/lib/compat_fixes.sh"
+source "${work_dir}/lib/selinux_merge.sh"
+source "${work_dir}/lib/opex_patch.sh"
 
-check unzip aria2c 7z zip java python3 zstd bc xmlstarlet simg2img lpunpack
+check unzip aria2c 7z zip java python3 zstd bc xmlstarlet simg2img lpunpack \
+    debugfs e2fsck jq readelf sha256sum strings zipalign
 
 # 可在 bin/port_config 中更改
-port_partition=$(grep "partition_to_port" bin/port_config |cut -d '=' -f 2)
-super_list=$(grep "possible_super_list" bin/port_config |cut -d '=' -f 2)
-repackext4=$(grep "repack_with_ext4" bin/port_config |cut -d '=' -f 2)
-super_extended=$(grep "super_extended" bin/port_config |cut -d '=' -f 2)
-pack_with_dsu=$(grep "pack_with_dsu" bin/port_config | cut -d '=' -f 2)
-pack_method=$(grep "pack_method" bin/port_config | cut -d '=' -f 2)
-ddr_type=$(grep "ddr_type" bin/port_config | cut -d '=' -f 2)
-reusabe_partition_list=$(grep "reusabe_partition_list" bin/port_config | cut -d '=' -f 2)
-if [[ ${repackext4} == true ]]; then
-    pack_type=EXT
-else
-    pack_type=EROFS
+config_value() {
+    local key="$1"
+    local default_value="${2:-}"
+    local value
+    value=$(
+        awk -F= -v key="$key" '
+            $1 ~ "^[[:space:]]*" key "[[:space:]]*$" {
+                sub(/^[^=]*=/, "")
+                sub(/[[:space:]]+#.*$/, "")
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "")
+                print
+                exit
+            }
+        ' "${work_dir}/bin/port_config"
+    )
+    printf '%s\n' "${value:-$default_value}"
+}
+
+port_partition=$(config_value partition_to_port)
+super_list=$(config_value possible_super_list)
+repackext4=$(config_value repack_with_ext4 false)
+super_extended=$(config_value super_extended false)
+pack_with_dsu=$(config_value pack_with_dsu false)
+pack_method=$(config_value pack_method stock)
+ddr_type=$(config_value ddr_type "")
+reusabe_partition_list=$(config_value reusabe_partition_list "")
+
+if [[ -z "$port_partition" || -z "$super_list" ]]; then
+    error "port_config 缺少分区配置" "port_config is missing partition configuration"
+    exit 1
+fi
+if [[ "$repackext4" != "true" && "$repackext4" != "false" ]]; then
+    error "repack_with_ext4 必须为 true 或 false" \
+          "repack_with_ext4 must be true or false"
+    exit 1
 fi
 
-if [ ${globalise} == true ] && [ ! $portrom2 ];then
+if [[ "$repackext4" == "true" ]]; then
+    pack_type=EXT
+    check make_ext4fs
+else
+    pack_type=EROFS
+    check mkfs.erofs
+fi
+
+if [[ "$globalise" == "true" && -z "$portrom2" ]]; then
     error "A second rom was not entered. Please use a ColorOS global rom with the same major version as your primary rom."
-    exit
+    exit 1
 fi
 
 # 检查为本地包还是链接
-if [ ! -f "${baserom}" ] && [ "$(echo $baserom |grep http)" != "" ];then
+if [[ ! -f "$baserom" && "$baserom" =~ ^https?:// ]]; then
     blue "底包为一个链接，正在尝试下载" "Download link detected, start downloading.."
-    aria2c --max-download-limit=1024M --file-allocation=none -s10 -x10 -j10 ${baserom}
-    baserom=$(basename ${baserom} | sed 's/\?t.*//')
-    if [ ! -f "${baserom}" ];then
+    aria2c --max-download-limit=1024M --file-allocation=none -s10 -x10 -j10 "$baserom" || exit 1
+    baserom="${work_dir}/$(basename "$baserom" | sed 's/\?t.*//')"
+    if [[ ! -f "$baserom" ]]; then
         error "下载错误" "Download error!"
+        exit 1
     fi
-elif [ -f "${baserom}" ];then
+elif [[ -f "$baserom" ]]; then
     green "底包: ${baserom}" "BASEROM: ${baserom}"
 else
     error "底包参数错误" "BASEROM: Invalid parameter"
-    exit
+    exit 1
 fi
 
-if [ ! -f "${portrom}" ] && [ "$(echo ${portrom} |grep http)" != "" ];then
+if [[ ! -f "$portrom" && "$portrom" =~ ^https?:// ]]; then
     blue "移植包为一个链接，正在尝试下载"  "Download link detected, start downloading.."
-    if [ "$(/usr/bin/echo $portrom | grep downloadCheck)" != "" ];then
+    if [[ "$portrom" == *downloadCheck* ]]; then
         blue "downloadCheck link detected! Redirecting..."
         portrom=$(curl -Lsv -I --compressed -H "userId: oplus-ota|16002018" -H "User-Agent: okhttp/3.12.12" -H "Accept: */*" -H "Connection: Keep-Alive" "${portrom}" 2>&1 | grep -i "< location:" | awk '{print $3}' | tr -d '\r')
     fi
-    aria2c -c --max-download-limit=1024M --file-allocation=none -s10 -x10 -j10 ${portrom}
-    portrom=$(basename ${portrom} | sed 's/\.zip.*/.zip/')
-    if [ ! -f "${portrom}" ];then
+    aria2c -c --max-download-limit=1024M --file-allocation=none -s10 -x10 -j10 "$portrom" || exit 1
+    portrom="${work_dir}/$(basename "$portrom" | sed 's/\.zip.*/.zip/')"
+    if [[ ! -f "$portrom" ]]; then
         error "下载错误" "Download error!"
+        exit 1
     fi
-elif [ -f "${portrom}" ];then
+elif [[ -f "$portrom" ]]; then
     green "移植包: ${portrom}" "PORTROM: ${portrom}"
 else
     error "移植包参数错误" "PORTROM: Invalid parameter"
-    exit
+    exit 1
 fi
 
 if [ "$(echo $baserom |grep ColorOS_)" != "" ];then
@@ -115,16 +164,17 @@ green "检测到底包类型: ${baserom_type}" "Detected base package type: ${ba
 
 
 echo $portrom2
-if [ ! -f "${portrom2}" ] && [ "$(echo ${portrom2} |grep http)" != "" ];then
+if [[ -n "$portrom2" && ! -f "$portrom2" && "$portrom2" =~ ^https?:// ]]; then
     blue "移植包为一个链接，正在尝试下载"  "Download link detected, start downloading.."
-    if [ "$(/usr/bin/echo $portrom2 | grep downloadCheck)" != "" ];then
+    if [[ "$portrom2" == *downloadCheck* ]]; then
         blue "downloadCheck link detected! Redirecting..."
         portrom2=$(curl -Lsv -I --compressed -H "userId: oplus-ota|16002018" -H "User-Agent: okhttp/3.12.12" -H "Accept: */*" -H "Connection: Keep-Alive" "${portrom2}" 2>&1 | grep -i "< location:" | awk '{print $3}' | tr -d '\r')
     fi
-    aria2c -c --max-download-limit=1024M --file-allocation=none -s10 -x10 -j10 ${portrom2}
-    portrom2=$(basename ${portrom2} | sed 's/\.zip.*/.zip/')
-    if [ ! -f "${portrom2}" ];then
+    aria2c -c --max-download-limit=1024M --file-allocation=none -s10 -x10 -j10 "$portrom2" || exit 1
+    portrom2="${work_dir}/$(basename "$portrom2" | sed 's/\.zip.*/.zip/')"
+    if [[ ! -f "$portrom2" ]]; then
         error "下载错误" "Download error!"
+        exit 1
     fi
 fi
 blue "开始检测ROM移植包" "Validating PORTROM.."
@@ -188,20 +238,25 @@ green "ROM初步检测通过" "ROM validation passed."
 
 blue "正在清理文件" "Cleaning up.."
 
-rm -rf app
-rm -rf tmp
-rm -rf config
-rm -rf build/baserom/
-rm -rf build/portrom/
-find . -type d -name 'ColorOS_*' |xargs rm -rf
+rm -rf \
+    "${work_dir}/app" \
+    "${work_dir}/tmp" \
+    "${work_dir}/config" \
+    "${work_dir}/build/baserom" \
+    "${work_dir}/build/portrom"
+while IFS= read -r -d '' stale_dir; do
+    rm -rf "$stale_dir"
+done < <(
+    find "${work_dir}" -mindepth 1 -maxdepth 1 -type d \
+        -name 'ColorOS_*' -print0
+)
 
 green "文件清理完毕" "Files cleaned up."
-mkdir -p build/baserom/images/
-
-mkdir -p build/portrom/images/
-
-mkdir tmp 
-export TMPDIR=$work_dir/tmp/
+mkdir -p \
+    "${work_dir}/build/baserom/images" \
+    "${work_dir}/build/portrom/images" \
+    "${work_dir}/tmp"
+export TMPDIR="${work_dir}/tmp"
 # ===== 提取底包 =====
 if [[ ${baserom_type} == 'payload' ]]; then
     blue "正在提取底包 [payload.bin]" "Extracting files from BASEROM [payload.bin]"   
@@ -349,7 +404,8 @@ if [[ "${cache_valid}" != "true" ]]; then
             exit 1
         fi
         blue "正在解包 super.img" "Unpacking super.img"
-        unpack_super "build/${version_name}/super.img" "build/${version_name}/" "${PARTS[*]}" || exit 1
+        unpack_super "build/${version_name}/super.img" "build/${version_name}/" \
+            "${PARTS[*]}" || exit 1
         # Sanity-check BEFORE we copy anything out. Otherwise a partial
         # extraction would drag stale super.img / unrelated files into
         # build/portrom/images and poison the downstream OTA build.
@@ -507,23 +563,43 @@ if [[ -n ${version_name} ]] && [[ -n ${version_name2} ]];then
 elif [[ -n ${version_name} ]];then
     app_patch_folder=${version_name}
 fi
+prepare_patch_cache "build/${app_patch_folder}" || exit 1
 
 for part in system product system_ext my_product my_manifest;do
-    extract_partition build/baserom/images/${part}.img build/baserom/images    
+    extract_partition "build/baserom/images/${part}.img" build/baserom/images
 done
 
-# Move those to portrom folder. We need to pack those imgs into final port rom
-for image in vendor odm my_company my_preload system_dlkm vendor_dlkm my_engineering;do
+# A hybrid package may already contain a device-matched vendor/odm stack. Keep
+# that matched set together with its dlkm and my_* partitions; mixing the A14
+# base vendor with the A16 system causes HAL, media, NFC, and SELinux failures.
+select_device_partition_stack || exit 1
+
+if [[ "$port_device_stack_compatible" == "true" ]]; then
+    base_partition_overrides=(system_dlkm vendor_dlkm)
+    rm -f \
+        build/baserom/images/vendor.img \
+        build/baserom/images/odm.img \
+        build/baserom/images/my_company.img \
+        build/baserom/images/my_preload.img \
+        build/baserom/images/my_engineering.img
+else
+    base_partition_overrides=(
+        vendor odm my_company my_preload system_dlkm vendor_dlkm my_engineering
+    )
+fi
+
+# Move base-owned logical partitions only when the port stack does not match.
+for image in "${base_partition_overrides[@]}"; do
     if [ -f build/baserom/images/${image}.img ];then
         mv -f build/baserom/images/${image}.img build/portrom/images/${image}.img
 
-        # Extracting vendor at first, we need to determine which super parts to pack from Baserom fstab. 
-        extract_partition build/portrom/images/${image}.img build/portrom/images/
+        extract_partition "build/portrom/images/${image}.img" build/portrom/images/
 
     fi
 done
 
-if [ ! -d build/portrom/images/system_dlkm ];then
+if [[ ! -d build/portrom/images/system_dlkm &&
+      ! -f build/portrom/images/system_dlkm.img ]]; then
         super_list="system system_ext vendor product my_product odm my_engineering my_stock my_heytap my_carrier my_region my_bigball my_manifest my_company my_preload"
 fi
 # Extract the partitions list that need to pack into the super.img
@@ -532,6 +608,7 @@ fi
 
 # 分解镜像
 green "开始提取逻辑分区镜像" "Starting extract portrom partition from img"
+extract_pids=()
 for part in ${super_list};do
     # 检查是否在 skip_list1 或 skip_list2 中
 #    if [[ " ${skip_list1[@]} " =~ " ${part} " ]] || [[ " ${skip_list2[@]} " =~ " ${part} " ]]; then
@@ -546,11 +623,22 @@ for part in ${super_list};do
         extract_partition "${work_dir}/build/portrom/images/${part}.img" "${work_dir}/build/portrom/images/" && \
         rm -rf "${work_dir}/build/baserom/images/${part}.img"
         ) &
+        extract_pids+=("$!")
     else
         yellow "跳过从PORTROM提取分区[${part}]" "Skip extracting [${part}] from PORTROM"
     fi
 done
-wait
+extract_failed=false
+for extract_pid in "${extract_pids[@]}"; do
+    if ! wait "$extract_pid"; then
+        extract_failed=true
+    fi
+done
+if [[ "$extract_failed" == "true" ]]; then
+    error "一个或多个逻辑分区提取失败" \
+          "One or more logical partitions failed to extract"
+    exit 1
+fi
 rm -rf config
 
 blue "正在获取ROM参数" "Fetching ROM build prop."
@@ -936,7 +1024,8 @@ if [[ ${base_android_version} == 13 ]] && [[ ${port_android_version} == 14 ]];th
     fi
 fi
 
-if [[  ${port_android_version} -ge 15 ]]; then
+if [[ "$port_device_stack_compatible" != "true" ]] &&
+   [[ ${port_android_version} -ge 15 ]]; then
     if [[ ${base_device_family} == "OPSM8250" ]] && [[ ${base_android_version} != 13 ]];then
         unzip -o devices/common/ril_fix_sm8250.zip -d ${work_dir}/build/portrom/images/
         rm -rf build/portrom/images/odm/lib/libmindroid-app.so \
@@ -950,6 +1039,24 @@ if [[  ${port_android_version} -ge 15 ]]; then
             build/portrom/images/odm/lib/vendor.oplus.hardware.subsys-V1-ndk_platform.so \
             build/portrom/images/odm/lib64/vendor.oplus.hardware.subsys_radio-V1-ndk_platform.so \
             build/portrom/images/odm/lib64/vendor.oplus.hardware.subsys-V1-ndk_platform.so
+
+        # The newer ColorOS SystemUI queries displayPanelFeature before it
+        # exposes the classic/partial/full-screen AOD modes.  The stock SM8350
+        # composer from the base ROM returns no panel feature data, which makes
+        # SystemUI write both panoramic support settings as 0 and Aod.apk hide
+        # the partial-screen/default-clock choices.  Use the known-compatible
+        # composer shipped by the working blahajcoding port instead of patching
+        # and re-signing SystemUI/Aod.apk.
+        if [[ -f devices/common/aod_fix_sm8350.zip ]]; then
+            blue "修复 SM8350 AOD 显示面板特性" \
+                 "Fixing SM8350 AOD display panel features"
+            unzip -o devices/common/aod_fix_sm8350.zip \
+                -d "${work_dir}/build/portrom/images/" || exit 1
+        else
+            error "缺少 SM8350 AOD 修复包: devices/common/aod_fix_sm8350.zip" \
+                  "Missing SM8350 AOD fix: devices/common/aod_fix_sm8350.zip"
+            exit 1
+        fi
     fi
 
     if [[ ${base_android_version} == 14 ]]; then
@@ -1004,19 +1111,52 @@ if [[  ${port_android_version} -ge 15 ]]; then
     fi
 fi
 
-if [[ ! -f build/portrom/images/vendor/lib64/vendor.oplus.hardware.radio-V2-ndk_platform.so ]] && [[ ${base_device_family} == "OPSM8350" ]];then
+if [[ "$port_device_stack_compatible" != "true" ]] &&
+   [[ ! -f build/portrom/images/vendor/lib64/vendor.oplus.hardware.radio-V2-ndk_platform.so ]] &&
+   [[ ${base_device_family} == "OPSM8350" ]]; then
     blue "Fixing RIL..."
     unzip -o devices/common/ril_fix_A16_SM8350.zip -d ${work_dir}/build/portrom/images/vendor/
     rm -rf build/portrom/images/vendor/*/vendor.oplus.hardware.radio-V1-ndk_platform.so
 fi
 
+# CustCore.opex supplies the AppFeature provider used by OplusLauncher's
+# Seedling/Fluid Cloud pinning path. Its inner APK and outer OPEX are signed
+# separately, so even a length-preserving manifest edit makes the whole module
+# disappear at boot. Keep the original testOnly manifest and verify both OEM
+# signatures instead of modifying or re-signing either layer.
+if type fix_custcore_testonly &>/dev/null; then
+    fix_custcore_testonly || exit 1
+fi
+
+# The device keeps the base ROM's vendor, but SELinux labels for vendor-side
+# services/properties live there too - so everything the port ROM introduced
+# ends up unlabelled and gets denied (measured: 214 denials, of which 10 of the
+# 11 denied services were exactly the labels missing from the base vendor).
+# Merge the port ROM's context entries in, declaring any type the base policy
+# does not know about. Base labels are never overwritten.
+if [[ "$port_device_stack_compatible" != "true" ]] && \
+   [[ ${port_android_version} -gt ${base_android_version} ]] && \
+   type merge_vendor_selinux_contexts &>/dev/null; then
+    blue "合并 SELinux 上下文 (A${base_android_version} vendor + A${port_android_version} services)" \
+         "Merging SELinux contexts (A${base_android_version} vendor + A${port_android_version} services)"
+    if extract_port_vendor_for_selinux "${portrom}" "${work_dir}/tmp/portvendor"; then
+        merge_vendor_selinux_contexts
+    fi
+fi
+
 echo "ro.surface_flinger.game_default_frame_rate_override=120" >>  build/portrom/images/vendor/default.prop
+# These packages are OEM/platform signed. Rebuilding or testkey-signing them
+# drops signature permissions (SystemUI then cannot obtain
+# INTERACT_ACROSS_USERS_FULL/BLUETOOTH_CONNECT). Keep them pristine by default.
+patch_protected_oem_apks=$(config_value patch_protected_oem_apks false)
 #Unlock AI Call
 targetAICallAssistant=$(find build/portrom/images/ -name "HeyTapSpeechAssist.apk")
-if [[ -f build/${app_patch_folder}/patched/HeyTapSpeechAssist.apk ]]; then
+if [[ "$patch_protected_oem_apks" == "true" ]] && \
+   [[ -f build/${app_patch_folder}/patched/HeyTapSpeechAssist.apk ]]; then
     blue "复制已经处理过的HeyTapSpeechAssist.apk"
     cp -rfv build/${app_patch_folder}/patched/HeyTapSpeechAssist.apk $targetAICallAssistant
-elif [[ -f $targetAICallAssistant ]];then
+elif [[ "$patch_protected_oem_apks" == "true" ]] && \
+     [[ -f $targetAICallAssistant ]];then
         blue "Unlock AI Call"
         cp -rf $targetAICallAssistant tmp/$(basename $targetAICallAssistant).bak
         java -jar bin/apktool/APKEditor.jar d -f -i $targetAICallAssistant -o tmp/HeyTapSpeechAssist $extra_args
@@ -1026,13 +1166,19 @@ elif [[ -f $targetAICallAssistant ]];then
         java -jar bin/apktool/APKEditor.jar b -f -i tmp/HeyTapSpeechAssist -o build/${app_patch_folder}/patched/HeyTapSpeechAssist.apk $extra_args
         cp -rfv build/${app_patch_folder}/patched/HeyTapSpeechAssist.apk $targetAICallAssistant 
 fi
+if [[ "$patch_protected_oem_apks" == "true" && -f "$targetAICallAssistant" ]]; then
+    sign_apk_in_place "$targetAICallAssistant" || exit 1
+fi
 # patch_smali_with_apktool "HeyTapSpeechAssist.apk" "com/heytap/speechassist/aicall/setting/config/AiCallCommonBean.smali" ".method public final getSupportAiCall()Z/,/.end method" ".method public final getSupportAiCall()Z\n\t.locals 1\n\tconst\/4 v0, 0x1\n\treturn v0\n.end method" "regex"
 
-ota_patched=false
-if [[ $regionmark == "CN" ]];then
+ota_patched=true
+if [[ "$patch_protected_oem_apks" == "true" ]]; then
+    ota_patched=false
+fi
+if [[ "$patch_protected_oem_apks" == "true" && $regionmark == "CN" ]];then
     cp -rf devices/common/OTA_CN.apk build/portrom/images/system_ext/app/OTA/OTA.apk && ota_patched=true
 
-else
+elif [[ "$patch_protected_oem_apks" == "true" ]]; then
     cp -rf devices/common/OTA_IN.apk build/portrom/images/system_ext/app/OTA/OTA.apk && ota_patched=true
 fi
 
@@ -1053,6 +1199,7 @@ if [[ $ota_patched == "false" ]];then
         java -jar bin/apktool/APKEditor.jar b -f -i tmp/OTA -o  build/${app_patch_folder}/patched/OTA.apk  $extra_args
          cp -rfv build/${app_patch_folder}/patched/OTA.apk $targetOTA
     fi
+    [[ ! -f "$targetOTA" ]] || sign_apk_in_place "$targetOTA" || exit 1
 fi
 
 
@@ -1066,11 +1213,13 @@ fi
     #CPH2749 OnePlus 15
     [[ $regionmark != CN ]] && MODEL=CPH2745
 
-    if [[ -f build/${app_patch_folder}/patched/AIUnit.apk ]]; then
+    if [[ "$patch_protected_oem_apks" == "true" ]] && \
+       [[ -f build/${app_patch_folder}/patched/AIUnit.apk ]]; then
             blue "复制已经处理过的AIUnit.apk"
             cp -rfv build/${app_patch_folder}/patched/AIUnit.apk $targetAIUnit
         
-    elif [[ -f $targetAIUnit ]];then
+    elif [[ "$patch_protected_oem_apks" == "true" ]] && \
+         [[ -f $targetAIUnit ]];then
         blue "Unlock High-End AI features, Device Model: $MODEL"
         cp -rf $targetAIUnit tmp/$(basename $targetAIUnit).bak
         java -jar bin/apktool/APKEditor.jar d -f -i $targetAIUnit -o tmp/AIUnit $extra_args
@@ -1108,6 +1257,9 @@ fi
         java -jar bin/apktool/APKEditor.jar b -f -i tmp/AIUnit -o build/${app_patch_folder}/patched/AIUnit.apk  $extra_args
         cp -rfv build/${app_patch_folder}/patched/AIUnit.apk $targetAIUnit 
     fi
+    if [[ "$patch_protected_oem_apks" == "true" && -f "$targetAIUnit" ]]; then
+        sign_apk_in_place "$targetAIUnit" || exit 1
+    fi
 
 if [[ $port_android_version == 16 ]] && [[ $base_android_version -lt 15 ]] ;then
     # workaround fix AI Eraser
@@ -1126,7 +1278,8 @@ if [[ -f devices/common/xeutoolbox.zip ]] && [[ $base_android_version -lt 15 ]] 
     echo "/system_ext/xbin/xeu_toolbox  u:object_r:toolbox_exec:s0" >> build/portrom/images/system_ext/etc/selinux/system_ext_file_contexts
     echo "(allow init toolbox_exec (file ((execute_no_trans))))" >> build/portrom/images/system_ext/etc/selinux/system_ext_sepolicy.cil
     unzip -o devices/common/xeutoolbox.zip -d build/portrom/images/
-elif [[ $base_android_version -lt 15 ]];then
+elif [[ $base_android_version -lt 15 ]] && \
+     [[ "$patch_protected_oem_apks" == "true" ]];then
     targetGallery=$(find build/portrom/images/ -name "OppoGallery2.apk")
     if [[ -f build/${app_patch_folder}/patched/OppoGallery2.apk ]]; then
             blue "复制已经处理过的OppoGallery2"
@@ -1140,9 +1293,11 @@ elif [[ $base_android_version -lt 15 ]];then
         java -jar bin/apktool/APKEditor.jar b -f -i tmp/Gallery -o build/${app_patch_folder}/patched/OppoGallery2.apk $extra_args
         cp -rfv build/${app_patch_folder}/patched/OppoGallery2.apk $targetGallery 
     fi
+    [[ ! -f "$targetGallery" ]] || sign_apk_in_place "$targetGallery" || exit 1
 fi
 
-if [[ ${base_device_family} == "OPSM8250" ]] || [[ ${base_device_family} == "OPSM8350" ]];then
+if [[ "$patch_protected_oem_apks" == "true" ]] && \
+   { [[ ${base_device_family} == "OPSM8250" ]] || [[ ${base_device_family} == "OPSM8350" ]]; }; then
     # Patch Battery Health Maximum capacity
     targetBattery=$(find build/portrom/images/ -name "Battery.apk")
     if [[ -f build/${app_patch_folder}/patched/Battery.apk ]]; then
@@ -1157,9 +1312,11 @@ if [[ ${base_device_family} == "OPSM8250" ]] || [[ ${base_device_family} == "OPS
         java -jar bin/apktool/APKEditor.jar b -f -i tmp/Battery -o build/${app_patch_folder}/patched/Battery.apk $extra_args
         cp -rfv build/${app_patch_folder}/patched/Battery.apk $targetBattery 
     fi
+    [[ ! -f "$targetBattery" ]] || sign_apk_in_place "$targetBattery" || exit 1
 fi 
 
-if [[ ${regionmark} != "CN" ]] && [[ ${base_product_model} != IN20* ]];then
+if [[ "$patch_protected_oem_apks" == "true" ]] && \
+   [[ ${regionmark} != "CN" ]] && [[ ${base_product_model} != IN20* ]];then
 
     # Charging info in Settings
     targetSettings=$(find build/portrom/images/ -name "Settings.apk")
@@ -1171,70 +1328,75 @@ if [[ ${regionmark} != "CN" ]] && [[ ${base_product_model} != IN20* ]];then
         targetSmali=$(find tmp -type f -name "DeviceChargeInfoController.smali")
         python3 bin/patchmethod_v2.py $targetSmali isPreferenceSupport
         java -jar bin/apktool/APKEditor.jar b -f -i tmp/Settings -o $targetSettings $extra_args
+        sign_apk_in_place "$targetSettings" || exit 1
     fi
 fi 
 
 targetOplusLauncher=$(find build/portrom/images/ -name "OplusLauncher.apk")
 
-if [[ -f $targetOplusLauncher ]] && [[ $base_product_first_api_level -gt 34 ]];then
+if [[ "$patch_protected_oem_apks" == "true" ]] && \
+   [[ -f $targetOplusLauncher ]] && [[ $base_product_first_api_level -gt 34 ]];then
 	blue "解锁运存显示"
 	cp -rf $targetOplusLauncher tmp/$(basename $targetOplusLauncher).bak
-	java -jar bin/apktool/APKEditor.jar d -f -i $targetOplusLauncher -o tmp/OplusLauncher $extra_args
-	targetSmali=$(find tmp -type f -path "*/com/oplus/basecommon/util/SystemPropertiesHelper.smali")
- python3 bin/patchmethod_v2.py $targetSmali getFirstApiLevel ".locals 1\n\tconst/16 v0, 0x22\n\treturn v0"
- java -jar bin/apktool/APKEditor.jar b -f -i tmp/OplusLauncher -o $targetOplusLauncher $extra_args
+	# NOTE: must NOT go through APKEditor decompile/rebuild here.
+	# OplusLauncher hosts the Seedling SDK plugin, and its class loader
+	# resolves host classes against the original DEX layout. A full rebuild
+	# collapses 10 dex files into 6 and breaks
+	#   com.oplus.coreapp.appfeature.AppFeatureProviderUtils
+	# which disables Fluid Cloud card pinning. Patch the single DEX instead.
+	patch_apk_preserve_dex "$targetOplusLauncher" \
+		"com/oplus/basecommon/util/SystemPropertiesHelper" \
+		getFirstApiLevel ".locals 1\n\tconst/16 v0, 0x22\n\treturn v0"
 fi
 
 targetSystemUI=$(find build/portrom/images/ -name "SystemUI.apk")
-if [[ -f build/${app_patch_folder}/patched/SystemUI.apk ]]; then
-        blue "复制已经处理过的SystemUI.apk"
-        cp -rfv build/${app_patch_folder}/patched/SystemUI.apk $targetSystemUI
-     
-elif [[ -f "$targetSystemUI" ]]; then
-    
-    cp -rf $targetSystemUI tmp/$(basename $targetSystemUI).bak
-    java -jar bin/apktool/APKEditor.jar d -f -i $targetSystemUI -o tmp/SystemUI $extra_args
+if [[ "$patch_protected_oem_apks" == "true" ]] && [[ -f "$targetSystemUI" ]]; then
     blue "解锁全景全屏AOD"
-    targetSmoothTransitionControllerSmali=$(find tmp/SystemUI -type f -name "SmoothTransitionController.smali")
-    python3 bin/patchmethod_v2.py "$targetSmoothTransitionControllerSmali" setPanoramicStatusForApplication
-    python3 bin/patchmethod_v2.py "$targetSmoothTransitionControllerSmali" setPanoramicSupportAllDayForApplication
+    patch_apk_preserve_dex "$targetSystemUI" \
+        "com/oplus/systemui/aod/display/SmoothTransitionController" \
+        setPanoramicStatusForApplication || exit 1
+    patch_apk_preserve_dex "$targetSystemUI" \
+        "com/oplus/systemui/aod/display/SmoothTransitionController" \
+        setPanoramicSupportAllDayForApplication || exit 1
 
-    targetAODDisplayUtilSmali=$(find tmp/SystemUI -type f -name "AODDisplayUtil.smali")
-    python3 bin/patchmethod_v2.py "$targetAODDisplayUtilSmali" isPanoramicProcessTypeNotSupportAllDay -return false
-    if [[ $base_product_first_api_level -gt 34 ]];then
-    targetStatusBarFeatureOptionSmali=$(find tmp/SystemUI -type f -name "StatusBarFeatureOption.smali")
-    python3 bin/patchmethod_v2.py "$targetStatusBarFeatureOptionSmali" isChargeVoocSpecialColorShow -return true
-    targetAodFeatureOptionSmali=$(find tmp/SystemUI -type f -name "AodFeatureOption.smali")
+    if [[ $base_product_first_api_level -gt 34 ]]; then
+        patch_apk_preserve_dex "$targetSystemUI" \
+            "com/oplusos/systemui/common/feature/StatusBarFeatureOption" \
+            isChargeVoocSpecialColorShow -return true || exit 1
     fi
-    python3 bin/patchmethod_v2.py $targetAodFeatureOptionSmali isSupportRamLessAod -return true
-    python3 bin/patchmethod_v2.py $targetAodFeatureOptionSmali isSupportLTPO1HzAOD -return true
-    python3 bin/patchmethod_v2.py $targetAodFeatureOptionSmali isDisableAodAlwaysOnDisplayMode -return false
-    python3 bin/patchmethod_v2.py $targetAodFeatureOptionSmali SmoothTransitionController -return true
-    if [[ $regionmark != "CN" ]];then
+
+    patch_apk_preserve_dex "$targetSystemUI" \
+        "com/oplusos/systemui/common/feature/AodFeatureOption" \
+        isSupportRamLessAod -return true || exit 1
+    patch_apk_preserve_dex "$targetSystemUI" \
+        "com/oplusos/systemui/common/feature/AodFeatureOption" \
+        isSupportLTPO1HzAOD -return true || exit 1
+    patch_apk_preserve_dex "$targetSystemUI" \
+        "com/oplusos/systemui/common/feature/AodFeatureOption" \
+        isDisableAodAlwaysOnDisplayMode -return false || exit 1
+
+    if [[ $regionmark != "CN" ]]; then
         blue "解锁MyDevice"
-        targetSmali=$(find tmp -type f -name "FeatureOption.smali")
-        python3 bin/patchmethod_v2.py $targetSmali isSupportMyDevice
+        patch_apk_preserve_dex "$targetSystemUI" \
+            "com/oplusos/systemui/common/feature/FeatureOption" \
+            isSupportMyDevice || exit 1
     fi
-    # tmp workaround
-    for style_xml_file in $(find tmp/SystemUI -name "styles.xml");do 
-        sed -i "s/style\/null/7f1403f6/g" $style_xml_file
-    done
-    java -jar bin/apktool/APKEditor.jar b -f -i tmp/SystemUI -o build/${app_patch_folder}/patched/SystemUI.apk $extra_args
-    cp -rfv build/${app_patch_folder}/patched/SystemUI.apk $targetSystemUI
 fi
 
 targetAOD=$(find build/portrom/images/ -name "Aod.apk")
 
-if [[ -f $targetAOD ]] && [[ $base_product_first_api_level -le 35 ]] ;then
-	blue "强制开启老机型AOD全天候息屏功能"
-	cp -rf $targetAOD tmp/$(basename $targetAOD).bak
-	java -jar bin/apktool/APKEditor.jar d -f -i $targetAOD -o tmp/Aod $extra_args
-	targetCommonUtilsSmali=$(find tmp -type f -path "*/com/oplus/aod/util/CommonUtils.smali")
-    targetSettingsSmali=$(find tmp -type f -path "*/com/oplus/aod/util/SettingsUtils.smali")
-    python3 bin/patchmethod_v2.py $targetCommonUtilsSmali isSupportFullAod -return true
-    python3 bin/patchmethod_v2.py $targetCommonUtilsSmali isFirstApiLevelOS16 -return true
-    python3 bin/patchmethod_v2.py $targetSettingsSmali getKeyAodAllDaySupportSettings -return true
-    java -jar bin/apktool/APKEditor.jar b -f -i tmp/Aod -o $targetAOD $extra_args
+if [[ "$patch_protected_oem_apks" == "true" ]] && \
+   [[ -f $targetAOD ]] && [[ $base_product_first_api_level -le 35 ]] ;then
+    blue "强制开启老机型AOD全天候息屏功能"
+    patch_apk_preserve_dex "$targetAOD" \
+        "com/oplus/aod/util/CommonUtils" \
+        isSupportFullAod -return true || exit 1
+    patch_apk_preserve_dex "$targetAOD" \
+        "com/oplus/aod/util/CommonUtils" \
+        isFirstApiLevelOS16 -return true || exit 1
+    patch_apk_preserve_dex "$targetAOD" \
+        "com/oplus/aod/util/SettingsUtils" \
+        getKeyAodAllDaySupportSettings -return true || exit 1
 fi
 yellow "删除多余的App" "Debloating..." 
 # List of apps to be removed
@@ -1428,34 +1590,45 @@ if [[ ${base_vendor_brand,,} != ${port_vendor_brand,,} ]] && [[ $portIsColorOSGl
     sed -i "s/ro.oplus.image.system_ext.brand=.*/ro.oplus.image.system_ext.brand=${base_vendor_brand,,}/g" build/portrom/images/system_ext/etc/build.prop
 fi
 
-# fix bootloop
-if [[ -f build/baserom/images/my_product/etc/extension/sys_game_manager_config.json ]];then
-    cp -rf build/baserom/images/my_product/etc/extension/sys_game_manager_config.json build/portrom/images/my_product/etc/extension/
-else
-    rm -rf build/portrom/images/my_product/etc/extension/sys_game_manager_config.json
-fi
+if [[ "$port_device_stack_compatible" != "true" ]]; then
+    # Legacy cross-device ports need the base device's display/audio configs.
+    if [[ -f build/baserom/images/my_product/etc/extension/sys_game_manager_config.json ]]; then
+        cp -f build/baserom/images/my_product/etc/extension/sys_game_manager_config.json \
+            build/portrom/images/my_product/etc/extension/
+    else
+        rm -f build/portrom/images/my_product/etc/extension/sys_game_manager_config.json
+    fi
 
-if [[ ! -f build/baserom/images/my_product/etc/extension/sys_graphic_enhancement_config.json ]];then
-    rm -rf build/portrom/images/my_product/etc/extension/sys_graphic_enhancement_config.json
-else
-    cp -rf build/baserom/images/my_product/etc/extension/sys_graphic_enhancement_config.json build/portrom/images/my_product/etc/extension/
-fi
+    if [[ ! -f build/baserom/images/my_product/etc/extension/sys_graphic_enhancement_config.json ]]; then
+        rm -f build/portrom/images/my_product/etc/extension/sys_graphic_enhancement_config.json
+    else
+        cp -f build/baserom/images/my_product/etc/extension/sys_graphic_enhancement_config.json \
+            build/portrom/images/my_product/etc/extension/
+    fi
 
-if [[ $(cat build/baserom/images/my_product/build.prop | grep "ro.oplus.audio.effect.type" | cut -d "=" -f 2) == "dolby" ]] ;then
-   blue "修复杜比音效+多应用音量调节 SM8250/SM8350" "Fix Dolby + App Specific volume adjustment for SM8250/SM8350"
-    #cp $source_dolby_lib build/portrom/images/system_ext/lib64/
-    cp build/baserom/images/my_product/etc/permissions/oplus.product.features_dolby_stereo.xml build/portrom/images/my_product/etc/permissions/oplus.product.features_dolby_stereo.xml
-    unzip -o devices/common/dolby_fix.zip -d build/portrom/images/ 
-fi
+    if grep -q '^ro.oplus.audio.effect.type=dolby' \
+        build/baserom/images/my_product/build.prop; then
+        blue "修复杜比音效+多应用音量调节 SM8250/SM8350" \
+             "Fix Dolby + App Specific volume adjustment for SM8250/SM8350"
+        cp -f build/baserom/images/my_product/etc/permissions/oplus.product.features_dolby_stereo.xml \
+            build/portrom/images/my_product/etc/permissions/oplus.product.features_dolby_stereo.xml
+        unzip -o devices/common/dolby_fix.zip -d build/portrom/images/
+    fi
 
-# Fix wechat/whatsapp volume isue
-cp -rf build/baserom/images/my_product/etc/audio*.xml build/portrom/images/my_product/etc/
-cp -rf build/baserom/images/my_product/etc/default_volume_tables.xml build/portrom/images/my_product/etc/
-if [[ -d build/baserom/images/my_product/etc/breenospeech2 ]];then
-    cp -rf build/baserom/images/my_product/etc/breenospeech2/* build/portrom/images/my_product/etc/breenospeech2/
+    cp -f build/baserom/images/my_product/etc/audio*.xml \
+        build/portrom/images/my_product/etc/ 2>/dev/null || true
+    cp -f build/baserom/images/my_product/etc/default_volume_tables.xml \
+        build/portrom/images/my_product/etc/ 2>/dev/null || true
+    if [[ -d build/baserom/images/my_product/etc/breenospeech2 ]]; then
+        cp -rf build/baserom/images/my_product/etc/breenospeech2/. \
+            build/portrom/images/my_product/etc/breenospeech2/
+    fi
+    if [[ -d build/baserom/images/my_product/etc/fusionlight_profile ]]; then
+        rm -rf build/portrom/images/my_product/etc/fusionlight_profile
+        cp -rf build/baserom/images/my_product/etc/fusionlight_profile \
+            build/portrom/images/my_product/etc/
+    fi
 fi
-rm -rf build/portrom/images/my_product/etc/fusionlight_profile/*
-cp -rf build/baserom/images/my_product/etc/fusionlight_profile/*  build/portrom/images/my_product/etc/fusionlight_profile/
 # Fix game audio issue on 15.0.2 (13t)
 
 sed -i "/persist.vendor.display.pxlw.iris_feature=.*/d" build/portrom/images/my_product/etc/bruce/build.prop
@@ -1529,14 +1702,26 @@ if [[ $port_android_version -lt 16 ]];then
 fi
 add_prop_v2 "ro.sf.lcd_density" "${base_rom_density}"
 
-cp -rf build/baserom/images/my_product/app/com.oplus.vulkanLayer build/portrom/images/my_product/app/
-cp -rf build/baserom/images/my_product/app/com.oplus.gpudrivers.* build/portrom/images/my_product/app/
+if [[ "$port_device_stack_compatible" != "true" ]]; then
+    cp -rf build/baserom/images/my_product/app/com.oplus.vulkanLayer \
+        build/portrom/images/my_product/app/ 2>/dev/null || true
+    cp -rf build/baserom/images/my_product/app/com.oplus.gpudrivers.* \
+        build/portrom/images/my_product/app/ 2>/dev/null || true
+fi
 
-mkdir -p tmp/etc/permissions tmp/etc/extension
-cp -fv build/portrom/images/my_product/etc/permissions/*.xml tmp/etc/permissions/
-cp -fv build/portrom/images/my_product/etc/extension/*.xml tmp/etc/extension/
-cp -rf build/baserom/images/my_product/etc/permissions/*.xml build/portrom/images/my_product/etc/permissions/
-find tmp/etc/permissions/ -type f \( -name "multimedia*.xml" -o -name "*permissions*.xml" -o -name "*google*.xml"  -o -name "*configs*.xml" -o -name "*gsm*.xml" -o -name "feature_activity_preload.xml" -o -name "*gemini*.xml" -o -name "*gms*.xml" \) -exec cp -fv {} build/portrom/images/my_product/etc/permissions/ \;
+blue "合并底包与移植包的 feature XML" \
+     "Merging base and port feature XML"
+feature_merge_args=()
+if [[ "$port_device_stack_compatible" != "true" ]]; then
+    feature_merge_args+=(--hardware-from-base)
+fi
+python3 bin/merge_feature_xml.py \
+    --base-dir build/baserom/images/my_product/etc/permissions \
+    --port-dir build/portrom/images/my_product/etc/permissions \
+    "${feature_merge_args[@]}" || exit 1
+python3 bin/merge_feature_xml.py \
+    --base-dir build/baserom/images/my_product/etc/extension \
+    --port-dir build/portrom/images/my_product/etc/extension || exit 1
 
 
 if [[ $regionmark != "CN" ]];then
@@ -1544,16 +1729,14 @@ if [[ $regionmark != "CN" ]];then
         sed -i "/$i/d" build/portrom/images/my_stock/etc/config/app_v2.xml
    done
 fi
-
-cp -rf build/baserom/images/my_product/etc/permissions/*.xml build/portrom/images/my_product/etc/permissions/
-cp -rf build/baserom/images/my_product/etc/extension/*.xml build/portrom/images/my_product/etc/extension/
-cp -rf  build/baserom/images/my_product/etc/refresh_rate_config.xml build/portrom/images/my_product/etc/refresh_rate_config.xml
-
-#cp -rf build/baserom/images/my_product/etc/extension/*.xml build/portrom/images/my_product/etc/extension/
-
-cp -rf  build/baserom/images/my_product/etc/sys_resolution_switch_config.xml build/portrom/images/my_product/etc/sys_resolution_switch_config.xml
-
-cp -rf build/baserom/images/my_product/etc/permissions/com.oplus.sensor_config.xml build/portrom/images/my_product/etc/permissions/
+if [[ "$port_device_stack_compatible" != "true" ]]; then
+    cp -f build/baserom/images/my_product/etc/refresh_rate_config.xml \
+        build/portrom/images/my_product/etc/refresh_rate_config.xml 2>/dev/null || true
+    cp -f build/baserom/images/my_product/etc/sys_resolution_switch_config.xml \
+        build/portrom/images/my_product/etc/sys_resolution_switch_config.xml 2>/dev/null || true
+    cp -f build/baserom/images/my_product/etc/permissions/com.oplus.sensor_config.xml \
+        build/portrom/images/my_product/etc/permissions/ 2>/dev/null || true
+fi
 # add_feature "com.android.systemui.support_media_show" build/portrom/images/my_product/etc/extension/com.oplus.app-features.xml
 
 # Features Extension
@@ -1605,8 +1788,8 @@ oplus_features=(
     "oplus.hardware.display.motion_sickness^晕动舒缓提示"
 )
 
-for oplus_feature in ${oplus_features[@]}; do 
-    add_feature_v2 oplus_feature $oplus_feature
+for oplus_feature in "${oplus_features[@]}"; do
+    add_feature_v2 oplus_feature "$oplus_feature" || exit 1
 done
 
 if [[ $vndk_version -gt 33 ]];then
@@ -1688,8 +1871,8 @@ app_features=(
     "os.graphic.gallery.collage.asset_bounds_break^出圈^args=\"boolean:true\""
     "os.graphic.gallery.collage.livephoto^^args=\"boolean:true\""
 )
-for app_feature in ${app_features[@]}; do 
-    add_feature_v2 app_feature $app_feature
+for app_feature in "${app_features[@]}"; do
+    add_feature_v2 app_feature "$app_feature" || exit 1
 done
 add_feature_v2 permission_oplus_feature "oplus.software.game.cold.start.speedup.enable"
 add_feature_v2 permission_feature "com.plus.press_power_botton_experiment"
@@ -1786,10 +1969,15 @@ add_feature "oplus.hardware.audio.voice_isolation_support" build/portrom/images/
 add_feature "oplus.hardware.audio.voice_denoise_support" build/portrom/images/my_product/etc/permissions/oplus.product.feature_multimedia_unique.xml
 
 #旁路供电
-sed -i '/<\/extend_features>/i\
+# Must go into the stock com.oplus.app-features.xml: the platform does not read
+# side-car "*-ext-bruce.xml" files, so anything written there is ignored.
+plc_charge_xml="build/portrom/images/my_product/etc/extension/com.oplus.app-features.xml"
+if [[ -f "$plc_charge_xml" ]] && ! grep -q "com.oplus.plc_charge.support" "$plc_charge_xml"; then
+    sed -i '/<\/extend_features>/i\
     <app_feature name="com.oplus.plc_charge.support">\
         <StringList args="true"/>\
-    </app_feature>' build/portrom/images/my_product/etc/extension/com.oplus.app-features-ext-bruce.xml
+    </app_feature>' "$plc_charge_xml"
+fi
 add_feature_v2 app_feature "com.android.settings.device_rm^Realme设备"
 add_feature_v2  app_feature "com.oplus.fullscene_plc_charge.support^全场景旁路充电^args=\"boolean:true\""
 #三段式
@@ -1831,10 +2019,12 @@ if [[ -d $EUICC_GOOGLE ]];then
     remove_feature "com.android.systemui.keyguard_support_esimcard"
 fi
 
-cp -rf  build/baserom/images/my_product/vendor/etc/* build/portrom/images/my_product/vendor/etc/
+if [[ "$port_device_stack_compatible" != "true" ]]; then
+cp -rf build/baserom/images/my_product/vendor/etc/. \
+    build/portrom/images/my_product/vendor/etc/
 
- # Camera
- if [[ $base_android_version -lt 33 ]];then
+# Camera
+if [[ $base_android_sdk -lt 33 ]];then
     cp -rf  build/baserom/images/my_product/etc/camera/* build/portrom/images/my_product/etc/camera
     old_camera_app=$(find build/baserom/images/my_product -type f -name "OnePlusCamera.apk")
     if [[ -f $old_camera_app ]];then
@@ -1912,11 +2102,13 @@ for file in $(find build/baserom/images/my_product/etc/ -type f -name "OVMS_*");
         cp -rfv $file build/portrom/images/my_product/etc/
     fi
 done
+fi
 #fix chinese char
 find build/portrom/images/config -type f -name "*file_contexts" \
 	    -exec perl -i -ne 'print if /^[\x00-\x7F]+$/' {} \;
 #find build/portrom/images/config -type f -name "*file_contexts" -exec sed -i -E '/[\x{4e00}-\x{9fa5}]/d' {} \;
 
+if [[ "$port_device_stack_compatible" != "true" ]]; then
 # bootanimation
 if [[ $baseIsOOS == "true" && $portIsOOS == "true" ]]; then
     rm -rf build/portrom/images/my_product/media/bootanimation
@@ -1955,6 +2147,7 @@ if [ -f "${baseCarrierConfigOverlay}" ] && [ -f "${portCarrierConfigOverlay}" ];
     cp -rf ${baseCarrierConfigOverlay} $(dirname ${portCarrierConfigOverlay})
 else
     cp -rf ${baseCarrierConfigOverlay} build/portrom/images/my_product/overlay/
+fi
 fi
 
 
@@ -2015,6 +2208,7 @@ fi
  fi
 
 
+if [[ "$port_device_stack_compatible" != "true" ]]; then
 if [[ -d build/baserom/images/my_product/etc/vibrator ]];then
     rm -rfv build/portrom/images/my_product/etc/vibrator
     cp -rfv build/baserom/images/my_product/etc/vibrator build/portrom/images/my_product/etc/
@@ -2048,6 +2242,7 @@ else
     if [[ ! -f build/baserom/images/my_product/overlay/aon*.apk ]] && [[ $regionmark == "CN" ]];then
         rm -rfv build/portrom/images/my_product/overlay/aon*.apk
     fi
+fi
 fi
 #Realme隔空手势 CN限定
 if [[ -f devices/common/realme_gesture.zip ]] && [[ $port_vendor_brand != "realme" ]] && [[ $port_android_version -lt "16" ]];then
@@ -2086,9 +2281,10 @@ fi
 if [[ ${port_android_version} == 16 ]] && [[ ${base_android_version} -lt 15 ]];then
     rm -rf build/portrom/images/system_ext/priv-app/com.qualcomm.location
     #remove_feature "oplus.software.display.dcbacklight_support" force
-    if [[ -f  devices/common/nfc_fix_a16_v2.zip ]];then
-    rm -rf build/portrom/images/system/system/priv-app/NfcNci/*
-    unzip -o devices/common/nfc_fix_a16_v2.zip -d ${work_dir}/build/portrom/images/
+    if [[ "$port_device_stack_compatible" != "true" ]] &&
+       [[ -f devices/common/nfc_fix_a16_v2.zip ]]; then
+        rm -rf build/portrom/images/system/system/priv-app/NfcNci/*
+        unzip -o devices/common/nfc_fix_a16_v2.zip -d "${work_dir}/build/portrom/images/"
     fi
     if [[ $regionmark == "CN" ]];then
     unzip -o devices/common/wifi_fix_a16.zip -d ${work_dir}/build/portrom/images/
@@ -2134,7 +2330,9 @@ else
     yellow "devices/${base_product_device}/overlay 未找到" "devices/${base_product_device}/overlay not found" 
 fi
 
-if [[ -f "devices/${base_product_device}/odm_selinux_fix_a16.zip" ]] && [[ $port_android_version == 16 ]]; then
+if [[ "$port_device_stack_compatible" != "true" ]] &&
+   [[ -f "devices/${base_product_device}/odm_selinux_fix_a16.zip" ]] &&
+   [[ $port_android_version == 16 ]]; then
     unzip -o devices/${base_product_device}/odm_selinux_fix_a16.zip -d ${work_dir}/build/portrom/images/
 fi
 
@@ -2164,8 +2362,13 @@ if [[ $portIsRealmeUI == true ]]; then
     done
 fi
 
+apply_mediaserver_compat || exit 1
+apply_gui_extension_compat || exit 1
+apply_codec2_lazy_hal_fix || exit 1
+dedupe_selinux_contexts || exit 1
+
 blue "Optimising system..."
-echo "ZWNobyAiSnVuaSB3YXMgaGVyZSIgPj4gYnVpbGQvcG9ydHJvbS9pbWFnZXMvc3lzdGVtX2V4dC9ldGMvanVuaXBlcg==" | base64 -d | bash
+printf '%s\n' "Juni was here" >> build/portrom/images/system_ext/etc/juniper
 cp devices/common/lemonade.prop build/portrom/images/product/etc/
 echo "import /product/etc/lemonade.prop" >> build/portrom/images/system/system/build.prop
 
@@ -2283,6 +2486,7 @@ fi
 #     rm -rf build/portrom/images/${pname}.img
 # done
 echo "${pack_type}">fstype.txt
+validate_critical_port_artifacts || exit 1
 if [[ $super_extended == true ]];then
     superSize=$(bash bin/getSuperSize.sh "others")
 elif [[ $base_product_model == "KB2000" ]] && [[ "$is_ab_device" == false ]] ; then
@@ -2320,9 +2524,30 @@ for pname in ${super_list};do
         python3 bin/fspatch.py build/portrom/images/${pname} build/portrom/images/config/${pname}_fs_config
         python3 bin/contextpatch.py build/portrom/images/${pname} build/portrom/images/config/${pname}_file_contexts
         #perl -pi -e 's/\\@/@/g' build/portrom/images/config/${pname}_file_contexts
-        mkfs.erofs -zlz4hc,9 --mount-point ${pname} --fs-config-file build/portrom/images/config/${pname}_fs_config --file-contexts build/portrom/images/config/${pname}_file_contexts -T 1648635685 build/portrom/images/${pname}.img build/portrom/images/${pname}
+        if [[ "$pack_type" == "EROFS" ]]; then
+            mkfs.erofs -zlz4hc,9 \
+                --mount-point "$pname" \
+                --fs-config-file "build/portrom/images/config/${pname}_fs_config" \
+                --file-contexts "build/portrom/images/config/${pname}_file_contexts" \
+                -T 1648635685 \
+                "build/portrom/images/${pname}.img" \
+                "build/portrom/images/${pname}"
+        else
+            image_size=$((thisSize + thisSize / 8 + 32 * 1024 * 1024))
+            image_size=$(((image_size + 4095) / 4096 * 4096))
+            make_ext4fs -s -J \
+                -l "$image_size" \
+                -L "$pname" \
+                -a "$pname" \
+                -S "build/portrom/images/config/${pname}_file_contexts" \
+                -C "build/portrom/images/config/${pname}_fs_config" \
+                -T 1648635685 \
+                "build/portrom/images/${pname}.img" \
+                "build/portrom/images/${pname}"
+        fi
         if [ -f "build/portrom/images/${pname}.img" ];then
-            green "成功以 [erofs] 文件系统打包 [${pname}.img]" "Packing [${pname}.img] successfully with [erofs] format"
+            green "成功以 [${pack_type}] 文件系统打包 [${pname}.img]" \
+                  "Packed [${pname}.img] successfully as [${pack_type}]"
             #rm -rf build/portrom/images/${pname}
         else
             error "以 [${pack_type}] 文件系统打包 [${pname}] 分区失败" "Failed to pack [${pname}]"
@@ -2759,7 +2984,7 @@ else
     sed -i "s/andVersion/${port_android_version}/g" out/${os_type}_${rom_version}/META-INF/com/google/android/update-binary
     sed -i "s/device_code/${base_product_device}/g" out/${os_type}_${rom_version}/META-INF/com/google/android/update-binary
 
-    unix2dos out/${os_type}_${rom_version}/windows_flash_script.bat
+    to_crlf "out/${os_type}_${rom_version}/windows_flash_script.bat" || exit 1
 
     #disable vbmeta
     for img in $(find out/${os_type}_${rom_version}/ -type f -name "vbmeta*.img");do
