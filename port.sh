@@ -2250,6 +2250,75 @@ if [[ -f devices/common/realme_gesture.zip ]] && [[ $port_vendor_brand != "realm
     sed -i "s/ro.camera.privileged.3rdpartyApp=.*/ro.camera.privileged.3rdpartyApp=com.aiunit.aon\;com.oplus.gesture\;/g" build/portrom/images/my_stock/build.prop
 fi
 
+if [[ "${base_product_device}" == "OnePlus9Pro" ]] ||[[ "${base_product_device}" == "OnePlus9" ]] ||  [[ "${base_product_device}" == "OP4E5D" ]] || [[ "${base_product_device}" == "OP4E3F" ]]; then
+    if [[ "$portIsColorOS" == "true" ]];then
+        if [[ $port_android_version == "17" ]];then
+            if ensure_resource_available "devices/common/camera6.0-fix_cos.zip"; then
+                blue "ColorOS17 相机修复" "ColorOS17 Camera Fix"
+                rm -rf build/portrom/images/my_product/app/OplusCamera
+                rm -rf build/portrom/images/my_product/product_overlay/framework/com.oplus.camera.*.jar
+                echo "ro.vendor.oplus.camera.isSupportLumo=1" >> build/portrom/images/my_product/etc/bruce/build.prop
+                unzip -o devices/common/camera6.0-fix_cos.zip -d build/portrom/images/
+                if ensure_resource_available "devices/${base_product_device}/camera5.0-fix_odm.zip"; then
+                    unzip -o devices/${base_product_device}/camera5.0-fix_odm.zip -d build/portrom/images/
+                fi
+            fi
+        elif [[ $port_android_version == "16" ]];then
+            if ensure_resource_available "devices/common/camera6.0-fix_cos.zip"; then
+                blue "ColorOS16 相机修复" "ColorOS16 Camera Fix"
+                rm -rf build/portrom/images/my_product/app/OplusCamera
+                rm -rf build/portrom/images/my_product/product_overlay/framework/com.oplus.camera.*.jar
+                echo "ro.vendor.oplus.camera.isSupportLumo=1" >> build/portrom/images/my_product/etc/bruce/build.prop
+                unzip -o devices/common/camera6.0-fix_cos.zip -d build/portrom/images/
+                if ensure_resource_available "devices/${base_product_device}/camera5.0-fix_odm.zip"; then
+                    unzip -o devices/${base_product_device}/camera5.0-fix_odm.zip -d build/portrom/images/
+                fi
+            fi
+        elif [[ $port_android_version -ge "15" ]];then
+            if ensure_resource_available "devices/${base_product_device}/camera5.0-fix_cos.zip"; then
+                blue "ColorOS15 相机修复" "ColorOS15 Camera Fix"
+                rm -rf build/portrom/images/my_product/app/OplusCamera
+                rm -rf build/portrom/images/my_product/product_overlay/framework/com.oplus.camera.*.jar
+                echo "ro.vendor.oplus.camera.isSupportLumo=1" >> build/portrom/images/my_product/etc/bruce/build.prop
+                unzip -o devices/${base_product_device}/camera5.0-fix_cos.zip -d build/portrom/images/
+                if ensure_resource_available "devices/${base_product_device}/camera5.0-fix_odm.zip"; then
+                    unzip -o devices/${base_product_device}/camera5.0-fix_odm.zip -d build/portrom/images/
+                fi
+            fi
+        else
+            blue "添加实况照片拍摄支持" "Live Photo support"
+            rm -rf build/portrom/images/my_product/app/OplusCamera
+            rm -rf build/portrom/images/my_product/product_overlay/framework/com.oplus.camera.*.jar
+            if ensure_resource_available "devices/${base_product_device}/live_photo_adds.zip"; then
+                unzip -o devices/${base_product_device}/live_photo_adds.zip -d build/portrom/images/
+            fi
+        fi
+    elif  [[ "$portIsColorOSGlobal" == "true" ]];then
+        if ensure_resource_available "devices/${base_product_device}/camera5.0-fix_cos_global.zip"; then
+            blue "ColorOS Global 15 相机修复" "ColorOS15 Global Camera Fix"
+            rm -rf build/portrom/images/my_product/app/OplusCamera
+            rm -rf build/portrom/images/my_product/product_overlay/framework/com.oplus.camera.*.jar
+            echo "ro.vendor.oplus.camera.isSupportLumo=1" >> build/portrom/images/my_product/etc/bruce/build.prop
+            unzip -o devices/${base_product_device}/camera5.0-fix_cos_global.zip -d build/portrom/images/
+            if ensure_resource_available "devices/${base_product_device}/camera5.0-fix_odm.zip"; then
+                unzip -o devices/${base_product_device}/camera5.0-fix_odm.zip -d build/portrom/images/
+            fi
+        fi
+
+    elif  [[ "$portIsOOS" == "true" ]];then
+        if ensure_resource_available "devices/${base_product_device}/camera5.0-fix_oos.zip"; then
+            blue "OxygenOS15 相机修复" "OxygenOS 15 Camera Fix"
+            rm -rf build/portrom/images/my_product/app/OplusCamera
+            rm -rf build/portrom/images/my_product/product_overlay/framework/com.oplus.camera.*.jar
+            echo "ro.vendor.oplus.camera.isSupportLumo=1" >> build/portrom/images/my_product/etc/bruce/build.prop
+            unzip -o devices/${base_product_device}/camera5.0-fix_oos.zip -d build/portrom/images/
+            if ensure_resource_available "devices/${base_product_device}/camera5.0-fix_odm.zip"; then
+                unzip -o devices/${base_product_device}/camera5.0-fix_odm.zip -d build/portrom/images/
+            fi
+        fi
+    fi
+fi
+
 #高能户外模式
 add_prop_v2 "ro.oplus.ridermode.support_feature_switch" "11"
 
@@ -2338,27 +2407,32 @@ fi
 
 # Modules
 for module in devices/${base_product_device}/modules/*.sh; do
-    add_module $module
+    [[ -f "$module" ]] || continue
+    add_module "$module"
 done
 
 if [[ $portIsOOS == true ]]; then
     for module in devices/${base_product_device}/modules/oos/*.sh; do
-        add_module $module
+        [[ -f "$module" ]] || continue
+        add_module "$module"
     done
 fi
 if [[ $portIsColorOS == true ]]; then
     for module in devices/${base_product_device}/modules/cos/*.sh; do
-        add_module $module
+        [[ -f "$module" ]] || continue
+        add_module "$module"
     done
 fi
 if [[ $portIsColorOSGlobal == true ]]; then
     for module in devices/${base_product_device}/modules/cos-global/*.sh; do
-        add_module $module
+        [[ -f "$module" ]] || continue
+        add_module "$module"
     done
 fi
 if [[ $portIsRealmeUI == true ]]; then
     for module in devices/${base_product_device}/modules/rui/*.sh; do
-        add_module $module
+        [[ -f "$module" ]] || continue
+        add_module "$module"
     done
 fi
 

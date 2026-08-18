@@ -1305,6 +1305,83 @@ get_oplusrom_version() {
 
 trap 'error "强制中断脚本运行，以免误删重要文件！" "Script interrupted! Exiting to prevent accidental deletion." ; exit 1' SIGINT
 
+# GitHub Release asset source.
+#
+# Keep the same layout used by toraidl/coloros_port:
+#   devices/common/foo.zip -> common_foo.zip
+#   devices/DEVICE/foo.zip -> DEVICE_foo.zip
+#
+# This lets large binary fixes stay out of the git tree while still being
+# fetched automatically when port.sh needs them.
+export REPO_OWNER="${REPO_OWNER:-toraidl}"
+export REPO_NAME="${REPO_NAME:-coloros_port}"
+export RELEASE_TAG="${RELEASE_TAG:-assets}"
+
+generate_asset_name() {
+    local file_path="$1"
+    local dir_path
+    local filename
+    local prefix
+
+    dir_path=$(dirname "$file_path")
+    filename=$(basename "$file_path")
+
+    if [[ "$dir_path" == *"devices/"* ]]; then
+        prefix=$(echo "$dir_path" | sed 's/.*devices\///' | cut -d'/' -f1)
+        printf '%s_%s\n' "$prefix" "$filename"
+    elif [[ "$dir_path" == *"assets"* ]]; then
+        printf 'assets_%s\n' "$filename"
+    else
+        printf '%s\n' "$filename"
+    fi
+}
+
+download_from_release() {
+    local file_path="$1"
+    local asset_name
+    local download_url
+
+    [[ -f "$file_path" ]] && return 0
+
+    asset_name=$(generate_asset_name "$file_path")
+    download_url="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${RELEASE_TAG}/${asset_name}"
+
+    blue "尝试从 GitHub Release 下载: ${file_path}" \
+         "Downloading resource from GitHub Release: ${file_path}"
+    blue "GitHub Asset Name: ${asset_name}" \
+         "GitHub Asset Name: ${asset_name}"
+
+    mkdir -p "$(dirname "$file_path")"
+    rm -f "${file_path}.tmp"
+
+    if curl -fL --retry 3 --retry-delay 2 \
+        -o "${file_path}.tmp" "$download_url"; then
+        mv -f "${file_path}.tmp" "$file_path"
+        green "下载完成: ${file_path}" \
+              "Downloaded: ${file_path}"
+        return 0
+    fi
+
+    rm -f "${file_path}.tmp"
+    error "下载失败: ${download_url}" \
+          "Failed to download: ${download_url}"
+    return 1
+}
+
+ensure_resource_available() {
+    local resource_path="$1"
+
+    if [[ -f "$resource_path" ]]; then
+        green "资源已存在: ${resource_path}" \
+              "Resource exists: ${resource_path}"
+        return 0
+    fi
+
+    yellow "本地缺失资源: ${resource_path}" \
+           "Resource missing locally: ${resource_path}"
+    download_from_release "$resource_path"
+}
+
 
 add_module() {
     source $1
