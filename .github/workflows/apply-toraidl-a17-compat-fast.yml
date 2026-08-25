@@ -1,0 +1,128 @@
+name: Apply toraidl A17 compatibility (sparse)
+
+on:
+  push:
+    branches:
+      - port/toraidl-a17-compat-pr
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sparse checkout work branch
+        uses: actions/checkout@v4
+        with:
+          ref: port/toraidl-a17-compat-pr
+          fetch-depth: 2
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            port.sh
+            .github/workflows/apply-toraidl-a17-compat-fast.yml
+
+      - name: Apply requested commits
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_SHA=133afdd43ec4e66a1514da5759a1f96847f59712
+          A=19eae84690d567f1216363cc65f14ef6442f01c1
+          B=bacfa0626cb0b319d0f7ec2033e85cec4360a0fe
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add toraidl https://github.com/toraidl/coloros_port.git
+          git fetch --no-tags --filter=blob:none --depth=2 toraidl "$B"
+          git checkout --ignore-skip-worktree-bits "$A" -- devices/common/selinux_mapping/android11_vendor
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          B = "bacfa0626cb0b319d0f7ec2033e85cec4360a0fe"
+          p = Path("port.sh")
+          text = p.read_text()
+
+          old = 'if [[ $port_android_version == 16 ]] && [[ $base_android_version -lt 15 ]] ;then'
+          new = 'if [[ $port_android_version == 16 || $port_android_version == 17 ]] && [[ $base_android_version -lt 15 ]] ;then'
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit("AI eraser condition anchor not found")
+
+          # This branch already contains the same A17 camera branch from 19eae,
+          # plus newer local A16 camera ABI checks; preserve the local version.
+          if 'if [[ $port_android_version == "17" ]];then' not in text or 'ColorOS17 Camera Fix' not in text:
+              raise SystemExit("Expected existing A17 camera branch not found")
+
+          upstream = subprocess.check_output(["git", "show", f"{B}:port.sh"], text=True)
+          start_marker = '# Patch vendor file-contexts used both at runtime and by mkfs.erofs.'
+          start = upstream.find(start_marker)
+          if start < 0:
+              raise SystemExit("A17 compat start marker not found upstream")
+          end = upstream.find('if ensure_resource_available "devices/common/hdr_fix.zip"', start)
+          if end < 0:
+              end = upstream.find('if [[ -f devices/common/hdr_fix.zip ]]', start)
+          if end < 0:
+              raise SystemExit("A17 compat end marker not found upstream")
+          compat_block = upstream[start:end].rstrip() + "\n\n"
+
+          compat_marker = '# Android 17 + legacy vendor post-boot compatibility fixes.'
+          if compat_marker not in text:
+              anchors = [
+                  'if [[ -f devices/common/hdr_fix.zip ]]',
+                  'if ensure_resource_available "devices/common/hdr_fix.zip"',
+              ]
+              pos = next((text.find(a) for a in anchors if text.find(a) >= 0), -1)
+              if pos < 0:
+                  raise SystemExit("Target HDR anchor not found")
+              text = text[:pos] + compat_block + text[pos:]
+
+          old_odm = '''if [[ "$port_device_stack_compatible" != "true" ]] &&
+   [[ -f "devices/${base_product_device}/odm_selinux_fix_a16.zip" ]] &&
+   [[ $port_android_version == 16 ]]; then'''
+          new_odm = '''if [[ "$port_device_stack_compatible" != "true" ]] &&
+   [[ -f "devices/${base_product_device}/odm_selinux_fix_a16.zip" ]] &&
+   [[ $port_android_version == 16 || $port_android_version == 17 ]]; then'''
+          if old_odm in text:
+              text = text.replace(old_odm, new_odm, 1)
+          elif new_odm not in text:
+              raise SystemExit("ODM SELinux condition anchor not found")
+
+          if 'Final vendor_file_contexts validation failed before repack' not in text:
+              anchor = '        python3 bin/contextpatch.py build/portrom/images/${pname} build/portrom/images/config/${pname}_file_contexts\n'
+              pos = text.find(anchor)
+              if pos < 0:
+                  raise SystemExit("Repack contextpatch anchor not found")
+              insert_at = pos + len(anchor)
+              snippet = '''        # contextpatch.py rebuilds vendor_file_contexts from the extracted
+        # tree and drops recursive rules that do not correspond to a concrete
+        # file.  Re-apply the Android 17 overlay and /dev/ion rules before
+        # mkfs.erofs consumes the final file-contexts file.
+        if [[ ${port_android_version} == 17 && ${pname} == "vendor" ]];then
+            if ! a17_patch_vendor_context_file \\
+                "build/portrom/images/config/vendor_file_contexts" \\
+                "build/diagnostics/a17-compat/originals/vendor-file-contexts";then
+                error "重打包前最终 vendor_file_contexts 校验失败" \\
+                    "Final vendor_file_contexts validation failed before repack"
+                exit 1
+            fi
+        fi
+'''
+              text = text[:insert_at] + snippet + text[insert_at:]
+
+          p.write_text(text)
+          PY
+
+          bash -n port.sh
+          test -f devices/common/selinux_mapping/android11_vendor/system/30.0.cil
+          grep -q 'Android 17 + legacy vendor post-boot compatibility fixes' port.sh
+          grep -q 'Final vendor_file_contexts validation failed before repack' port.sh
+
+          rm -f .github/workflows/apply-toraidl-a17-compat-fast.yml
+          git reset --soft "$BASE_SHA"
+          git add -A
+          git commit -m "port: add toraidl Android 17 compatibility fixes"
+          git push --force-with-lease origin HEAD:refs/heads/port/toraidl-a17-compat-pr
