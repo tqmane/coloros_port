@@ -1261,7 +1261,7 @@ fi
         sign_apk_in_place "$targetAIUnit" || exit 1
     fi
 
-if [[ $port_android_version == 16 ]] && [[ $base_android_version -lt 15 ]] ;then
+if [[ $port_android_version == 16 || $port_android_version == 17 ]] && [[ $base_android_version -lt 15 ]] ;then
     # workaround fix AI Eraser
     cp build/portrom/images/odm/lib64/libaiboost.so build/portrom/images/my_product/lib64/libaiboost.so
     # sed -i 's|^/odm/lib64/libaiboost\.so.*$|/odm/lib64/libaiboost\.so u:object_r:same_process_hal_file:s0|' build/portrom/images/config/odm_file_contexts
@@ -2397,6 +2397,216 @@ if [[ ${port_android_version} == 16 ]] && [[ ${base_android_version} -lt 15 ]];t
     fi
 fi
 
+# Patch vendor file-contexts used both at runtime and by mkfs.erofs.  The
+# generic contextpatch.py pass later rebuilds the generated config from the
+# extracted tree, so the recursive compatibility rules are re-applied after
+# that pass in the repack loop below as well.
+a17_patch_vendor_context_file() {
+    local a17_contexts_file="$1"
+    local a17_backup_file="$2"
+    local a17_tmp_file="${a17_contexts_file}.a17.$$"
+
+    [[ -f "${a17_contexts_file}" ]] || return 2
+    if [[ ! -e "${a17_backup_file}" ]];then
+        mkdir -p "$(dirname "${a17_backup_file}")" || return 1
+        cp -p "${a17_contexts_file}" "${a17_backup_file}" || return 1
+    fi
+
+    # Keep explicit overlay APK entries compatible with Android 17's
+    # vendor_overlay_file type.  The recursive rule below covers any other
+    # vendor overlay files introduced by the port.
+    if ! awk '
+        BEGIN {
+            count = split("FrameworksResTarget_Vendor SecureElementResTarget_Vendor WifiResMainlineTarget WifiResMainlineTarget_spf WifiResTarget WifiResTarget_spf", names, " ");
+        }
+        {
+            for (i = 1; i <= count; ++i) {
+                if (index($0, "/vendor/overlay/" names[i]) == 1)
+                    sub(/u:object_r:vendor_file:s0[[:space:]]*$/, "u:object_r:vendor_overlay_file:s0");
+            }
+            print;
+        }
+    ' "${a17_contexts_file}" > "${a17_tmp_file}";then
+        rm -f "${a17_tmp_file}"
+        return 1
+    fi
+    mv -f "${a17_tmp_file}" "${a17_contexts_file}" || {
+        rm -f "${a17_tmp_file}"
+        return 1
+    }
+
+    grep -Fq '/vendor/overlay(/.*)? u:object_r:vendor_overlay_file:s0' "${a17_contexts_file}" || \
+        printf '%s\n' '/vendor/overlay(/.*)? u:object_r:vendor_overlay_file:s0' >> "${a17_contexts_file}" || return 1
+    grep -Eq '^/dev/ion[[:space:]]' "${a17_contexts_file}" || \
+        printf '%s\n' '/dev/ion u:object_r:ion_device:s0' >> "${a17_contexts_file}" || return 1
+    grep -Fq '/vendor/overlay(/.*)? u:object_r:vendor_overlay_file:s0' "${a17_contexts_file}" && \
+        grep -Eq '^/dev/ion[[:space:]]+u:object_r:ion_device:s0$' "${a17_contexts_file}"
+}
+
+# Android 17 + legacy vendor post-boot compatibility fixes.
+# 1. Restore the 30.0 SELinux compatibility mapping needed by first-stage init
+#    when an Android 11 vendor (SM8250/SM8350) is combined with A17 system.
+# 2. Allow renameat2 in qspm seccomp policy so qspmhal does not die with SIGSYS.
+# 3. Bridge the legacy /vendor/ueventd.rc through /vendor/etc/ueventd.rc,
+#    which is imported by the Android 17 platform ueventd rules.
+# 4. Keep the A17 Wi-Fi APEX and set config_wifiChannelUtilizationOverrideEnabled
+#    to true in the Oplus Wi-Fi RRO, avoiding the radioStats NPE.
+# 5. Label vendor overlays and /dev/ion for enforcing-mode Android 17 policy.
+if [[ ${port_android_version} == 17 ]];then
+    blue "Android 17 兼容修复" "Android 17 compatibility fixes"
+    mkdir -p build/diagnostics/a17-compat/originals
+
+    # SELinux 30.0 mapping: only copy from trusted assets, never rename the
+    # Android 17 31.0 mapping to 30.0.
+    selinux_map_source="${PORT_SELINUX_MAP_SOURCE:-devices/common/selinux_mapping/android11_vendor}"
+    if [[ ! -d ${selinux_map_source}/system ]];then
+        error "缺少可信 SELinux 30.0 mapping 来源: ${selinux_map_source}" \
+              "Missing trusted SELinux 30.0 mapping source: ${selinux_map_source}"
+        exit 1
+    fi
+    for map_part in system system_ext product;do
+        source_map_dir="${selinux_map_source}/${map_part}"
+        case ${map_part} in
+            system) target_map_dir="build/portrom/images/system/system/etc/selinux/mapping" ;;
+            system_ext|product) target_map_dir="build/portrom/images/${map_part}/etc/selinux/mapping" ;;
+        esac
+        mkdir -p "${target_map_dir}"
+        for map_file in 30.0.cil 30.0.compat.cil;do
+            source_map_file="${source_map_dir}/${map_file}"
+            target_map_file="${target_map_dir}/${map_file}"
+            [[ ${map_part} != "system" && ${map_file} == "30.0.compat.cil" ]] && continue
+            if [[ -s "${target_map_file}" ]] && grep -Eq '^\((type|typeattribute|typeattributeset|expandtypeattribute|roletype|allow|neverallow)[[:space:]]' "${target_map_file}";then
+                blue "已存在有效 ${map_part}/${map_file}，保留当前文件" "Keeping existing valid ${map_part}/${map_file}"
+                continue
+            fi
+            if [[ ! -f "${source_map_file}" ]] || ! grep -Eq '^\((type|typeattribute|typeattributeset|expandtypeattribute|roletype|allow|neverallow)[[:space:]]' "${source_map_file}";then
+                error "SELinux mapping 来源无效: ${source_map_file}" "Invalid SELinux mapping source: ${source_map_file}"
+                exit 1
+            fi
+            [[ -f "${target_map_file}" ]] && cp -p "${target_map_file}" "build/diagnostics/a17-compat/originals/${map_part}-${map_file}"
+            cp -p "${source_map_file}" "${target_map_file}"
+            green "补齐 ${map_part}/${map_file}" "Installed ${map_part}/${map_file}"
+        done
+    done
+
+    # ueventd compatibility: Android 17's system/etc/ueventd.rc imports
+    # /vendor/etc/ueventd.rc, while the Android 11 SM8250 vendor keeps the
+    # actual rules at /vendor/ueventd.rc.  Without this bridge, the legacy
+    # device-node permissions and firmware_directories rules are skipped.
+    a17_vendor_ueventd_legacy="build/portrom/images/vendor/ueventd.rc"
+    a17_vendor_ueventd_compat="build/portrom/images/vendor/etc/ueventd.rc"
+    if [[ -f "${a17_vendor_ueventd_legacy}" ]];then
+        a17_install_ueventd=true
+        if [[ -f "${a17_vendor_ueventd_compat}" ]];then
+            if grep -Eq '^[[:space:]]*import[[:space:]]+/vendor/ueventd\.rc[[:space:]]*$' "${a17_vendor_ueventd_compat}";then
+                a17_install_ueventd=false
+                green "vendor ueventd 兼容桥已存在" "Vendor ueventd compatibility bridge already exists"
+            else
+                a17_vendor_ueventd_size=$(wc -c < "${a17_vendor_ueventd_compat}")
+                # Do not replace a complete modern vendor ueventd file.  Only
+                # replace the old empty/short stub with the import bridge.
+                if [[ ${a17_vendor_ueventd_size} -gt 1024 ]];then
+                    a17_install_ueventd=false
+                    yellow "保留现有完整 vendor/etc/ueventd.rc（${a17_vendor_ueventd_size} bytes）" \
+                        "Keeping existing complete vendor/etc/ueventd.rc (${a17_vendor_ueventd_size} bytes)"
+                fi
+            fi
+        fi
+        if [[ ${a17_install_ueventd} == true ]];then
+            a17_ueventd_backup="build/diagnostics/a17-compat/originals/vendor-ueventd.rc"
+            [[ -f "${a17_vendor_ueventd_compat}" && -f "${a17_ueventd_backup}" ]] || \
+                { [[ -f "${a17_vendor_ueventd_compat}" ]] && cp -p "${a17_vendor_ueventd_compat}" "${a17_ueventd_backup}"; }
+            mkdir -p "$(dirname "${a17_vendor_ueventd_compat}")"
+            printf '%s\n' \
+                '# Android 17 reads vendor uevent rules from /vendor/etc/ueventd.rc.' \
+                '# Import the legacy vendor layout used by this Android 11 device image.' \
+                'import /vendor/ueventd.rc' > "${a17_vendor_ueventd_compat}"
+            chmod 0644 "${a17_vendor_ueventd_compat}"
+            if ! grep -Eq '^import /vendor/ueventd\.rc$' "${a17_vendor_ueventd_compat}";then
+                error "vendor ueventd 兼容桥写入失败" "Failed to install vendor ueventd compatibility bridge"
+                exit 1
+            fi
+            green "已补齐 vendor/etc/ueventd.rc → /vendor/ueventd.rc 兼容桥" \
+                "Added vendor/etc/ueventd.rc -> /vendor/ueventd.rc compatibility bridge"
+        fi
+    else
+        yellow "缺少 legacy vendor/ueventd.rc，跳过 ueventd 兼容桥" \
+            "Legacy vendor/ueventd.rc is missing; skipping the ueventd bridge"
+    fi
+
+    # SELinux file contexts: the generated vendor config is consumed by
+    # mkfs.erofs, while the runtime copy is used by restorecon/servicemanager.
+    a17_vendor_contexts="build/portrom/images/config/vendor_file_contexts"
+    a17_vendor_runtime_contexts="build/portrom/images/vendor/etc/selinux/vendor_file_contexts"
+    if [[ ! -f "${a17_vendor_contexts}" ]];then
+        error "缺少 vendor_file_contexts，无法修复 Android 17 SELinux 标签" \
+            "vendor_file_contexts is missing; cannot fix Android 17 SELinux labels"
+        exit 1
+    fi
+    if ! a17_patch_vendor_context_file "${a17_vendor_contexts}" \
+        "build/diagnostics/a17-compat/originals/vendor-file-contexts";then
+        error "修复 vendor_file_contexts 失败" "Failed to patch vendor_file_contexts"
+        exit 1
+    fi
+    if [[ -f "${a17_vendor_runtime_contexts}" ]];then
+        if ! a17_patch_vendor_context_file "${a17_vendor_runtime_contexts}" \
+            "build/diagnostics/a17-compat/originals/vendor-runtime-file-contexts";then
+            error "修复运行时 vendor_file_contexts 失败" \
+                "Failed to patch runtime vendor_file_contexts"
+            exit 1
+        fi
+    else
+        yellow "未找到运行时 vendor_file_contexts，跳过运行时标签补丁" \
+            "Runtime vendor_file_contexts is absent; skipping runtime label patch"
+    fi
+
+    # qspm seccomp: add renameat2 after the existing renameat rule (or at end).
+    qspm_policy="build/portrom/images/vendor/etc/seccomp_policy/qspm.policy"
+    if [[ -f "${qspm_policy}" ]];then
+        [[ -f build/diagnostics/a17-compat/originals/qspm.policy ]] || cp -p "${qspm_policy}" build/diagnostics/a17-compat/originals/qspm.policy
+        if ! grep -qxF "renameat2: 1" "${qspm_policy}";then
+            if grep -qxF "renameat: 1" "${qspm_policy}";then
+                sed -i '/^renameat: 1$/a renameat2: 1' "${qspm_policy}"
+            else
+                echo "renameat2: 1" >> "${qspm_policy}"
+            fi
+        fi
+        [[ $(grep -cFx "renameat2: 1" "${qspm_policy}") -eq 1 ]] || { error "qspm.policy 中 renameat2 规则数量异常" "Invalid renameat2 rule count in qspm.policy"; exit 1; }
+        green "qspm 已放行 renameat2" "qspm allows renameat2"
+    else
+        yellow "未找到 qspm.policy，跳过 qspm 修复" "qspm.policy not found; skipping qspm fix"
+    fi
+
+    # Wi-Fi RRO: rebuild only when both framework resources and the RRO exist.
+    wifi_rro="build/portrom/images/system_ext/overlay/OplusWifiResource.apk"
+    framework_res="build/portrom/images/system/system/framework/framework-res.apk"
+    oplus_framework_res="build/portrom/images/system_ext/framework/oplus-framework-res.apk"
+    if [[ -f "${wifi_rro}" ]] && [[ -f "${framework_res}" ]] && [[ -f "${oplus_framework_res}" ]];then
+        [[ -f build/diagnostics/a17-compat/originals/OplusWifiResource.apk ]] || cp -p "${wifi_rro}" build/diagnostics/a17-compat/originals/OplusWifiResource.apk
+        if otatools/bin/aapt2 dump resources "${wifi_rro}" 2>/dev/null | awk '/bool\/config_wifiChannelUtilizationOverrideEnabled/{seen=1;next} seen && /^[[:space:]]*resource /{exit} seen && /^[[:space:]]*\(\)[[:space:]]+true[[:space:]]*$/{found=1;exit} END{exit(found?0:1)}';then
+            blue "OplusWifiResource.apk 已是兼容配置" "OplusWifiResource.apk already compatible"
+        else
+            a17_tmp=$(mktemp -d "${TMPDIR:-tmp}/a17-wifi.XXXXXX")
+            mkdir -p "${a17_tmp}/framework"
+            java -jar bin/apktool/apktool.jar if -p "${a17_tmp}/framework" "${framework_res}" || { error "安装 framework-res 失败" "Failed to install framework-res"; exit 1; }
+            java -jar bin/apktool/apktool.jar if -p "${a17_tmp}/framework" "${oplus_framework_res}" || { error "安装 oplus-framework-res 失败" "Failed to install oplus-framework-res"; exit 1; }
+            java -jar bin/apktool/apktool.jar d -f -p "${a17_tmp}/framework" -o "${a17_tmp}/OplusWifiResource" "${wifi_rro}" || { error "解码 OplusWifiResource 失败" "Failed to decode OplusWifiResource"; exit 1; }
+            bool_file=$(grep -R -l --include="bools.xml" "config_wifiChannelUtilizationOverrideEnabled" "${a17_tmp}/OplusWifiResource/res" 2>/dev/null | head -n 1)
+            [[ -n "${bool_file}" ]] || { error "RRO 中不存在 config_wifiChannelUtilizationOverrideEnabled" "RRO bool not found"; exit 1; }
+            sed -E -i 's#(<bool[[:space:]]+name="config_wifiChannelUtilizationOverrideEnabled">)[^<]*(</bool>)#\1true\2#' "${bool_file}"
+            grep -Eq '<bool[[:space:]]+name="config_wifiChannelUtilizationOverrideEnabled">true</bool>' "${bool_file}" || { error "写入 Wi-Fi 兼容值失败" "Failed to set Wi-Fi bool"; exit 1; }
+            java -jar bin/apktool/apktool.jar b -f -p "${a17_tmp}/framework" -o "${a17_tmp}/OplusWifiResource-unsigned.apk" "${a17_tmp}/OplusWifiResource" || { error "重编译 OplusWifiResource 失败" "Failed to rebuild OplusWifiResource"; exit 1; }
+            otatools/bin/apksigner sign --in "${a17_tmp}/OplusWifiResource-unsigned.apk" --out "${a17_tmp}/OplusWifiResource-signed.apk" --key key/testkey.pk8 --cert key/testkey.x509.pem --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true || { error "签名 OplusWifiResource 失败" "Failed to sign OplusWifiResource"; exit 1; }
+            otatools/bin/apksigner verify --verbose "${a17_tmp}/OplusWifiResource-signed.apk" || { error "签名验证失败" "Signature verification failed"; exit 1; }
+            cp -p "${a17_tmp}/OplusWifiResource-signed.apk" "${wifi_rro}"
+            green "OplusWifiResource.apk 修复并签名完成" "OplusWifiResource.apk rebuilt and signed"
+            rm -rf "${a17_tmp}"
+        fi
+    else
+        yellow "缺少 OplusWifiResource 或 framework 资源，跳过 Wi-Fi RRO 修复" "Missing RRO or framework resources; skipping Wi-Fi RRO fix"
+    fi
+fi
+
 if [[ -f devices/common/hdr_fix.zip ]] && [[ $base_android_version -le 14 ]];then
     unzip -o devices/common/hdr_fix.zip -d build/portrom/images/
     echo "persist.sys.feature.uhdr.support=true" >> build/portrom/images/my_product/etc/bruce/build.prop
@@ -2420,7 +2630,7 @@ fi
 
 if [[ "$port_device_stack_compatible" != "true" ]] &&
    [[ -f "devices/${base_product_device}/odm_selinux_fix_a16.zip" ]] &&
-   [[ $port_android_version == 16 ]]; then
+   [[ $port_android_version == 16 || $port_android_version == 17 ]]; then
     unzip -o devices/${base_product_device}/odm_selinux_fix_a16.zip -d ${work_dir}/build/portrom/images/
 fi
 
@@ -2616,6 +2826,19 @@ for pname in ${super_list};do
         fi
         python3 bin/fspatch.py build/portrom/images/${pname} build/portrom/images/config/${pname}_fs_config
         python3 bin/contextpatch.py build/portrom/images/${pname} build/portrom/images/config/${pname}_file_contexts
+        # contextpatch.py rebuilds vendor_file_contexts from the extracted
+        # tree and drops recursive rules that do not correspond to a concrete
+        # file. Re-apply the Android 17 overlay and /dev/ion rules before the
+        # final filesystem image is created.
+        if [[ ${port_android_version} == 17 && ${pname} == "vendor" ]];then
+            if ! a17_patch_vendor_context_file \
+                "build/portrom/images/config/vendor_file_contexts" \
+                "build/diagnostics/a17-compat/originals/vendor-file-contexts";then
+                error "重打包前最终 vendor_file_contexts 校验失败" \
+                    "Final vendor_file_contexts validation failed before repack"
+                exit 1
+            fi
+        fi
         #perl -pi -e 's/\\@/@/g' build/portrom/images/config/${pname}_file_contexts
         if [[ "$pack_type" == "EROFS" ]]; then
             mkfs.erofs -zlz4hc,9 \
