@@ -2259,8 +2259,8 @@ if [[ "${base_product_device}" == "OnePlus9Pro" ]] ||[[ "${base_product_device}"
                 rm -rf build/portrom/images/my_product/product_overlay/framework/com.oplus.camera.*.jar
                 echo "ro.vendor.oplus.camera.isSupportLumo=1" >> build/portrom/images/my_product/etc/bruce/build.prop
                 unzip -o devices/common/camera6.0-fix_cos.zip -d build/portrom/images/
-                if ensure_resource_available "devices/${base_product_device}/camera5.0-fix_odm.zip"; then
-                    unzip -o devices/${base_product_device}/camera5.0-fix_odm.zip -d build/portrom/images/
+                if ensure_resource_available "devices/${base_product_device}/camera6.0-fix_odm.zip"; then
+                    unzip -o devices/${base_product_device}/camera6.0-fix_odm.zip -d build/portrom/images/
                 fi
             fi
         elif [[ $port_android_version == "16" ]];then
@@ -2270,9 +2270,28 @@ if [[ "${base_product_device}" == "OnePlus9Pro" ]] ||[[ "${base_product_device}"
                 rm -rf build/portrom/images/my_product/product_overlay/framework/com.oplus.camera.*.jar
                 echo "ro.vendor.oplus.camera.isSupportLumo=1" >> build/portrom/images/my_product/etc/bruce/build.prop
                 unzip -o devices/common/camera6.0-fix_cos.zip -d build/portrom/images/
-                if ensure_resource_available "devices/${base_product_device}/camera5.0-fix_odm.zip"; then
-                    unzip -o devices/${base_product_device}/camera5.0-fix_odm.zip -d build/portrom/images/
+                if ensure_resource_available "devices/${base_product_device}/camera6.0-fix_odm.zip"; then
+                    unzip -o devices/${base_product_device}/camera6.0-fix_odm.zip -d build/portrom/images/
                 fi
+                # Camera 6.031+ requires the EXIF64 Camera Unit ABI.
+                # camera6.0-fix_cos.zip must therefore be the fixed payload
+                # whose Camera Unit SDK uses long[]/J and keeps int[] backward
+                # compatibility. Do not preserve the current build-tree SDK:
+                # on some hybrid ports it is already the legacy int32 copy.
+                camera_unit_sdk="${work_dir}/build/portrom/images/my_product/product_overlay/framework/com.oplus.camera.unit.sdk.jar"
+                camera_unit_framework_dir="$(dirname "$camera_unit_sdk")"
+                rm -f \
+                    "$camera_unit_framework_dir/oat/arm64/com.oplus.camera.unit.sdk.odex" \
+                    "$camera_unit_framework_dir/oat/arm64/com.oplus.camera.unit.sdk.vdex" \
+                    "$camera_unit_framework_dir/oat/arm64/com.oplus.camera.unit.sdk.adapter.odex" \
+                    "$camera_unit_framework_dir/oat/arm64/com.oplus.camera.unit.sdk.adapter.vdex"
+                rm -rf "${work_dir}/build/portrom/images/my_product/app/OplusCamera/oat"
+                python3 "${work_dir}/bin/check_camera_unit_exif_abi.py" \
+                    "$camera_unit_sdk" --require-exif64-dual || {
+                        error "Camera Unit EXIF64 ABI 检查失败。请使用修正版 camera6.0-fix_cos.zip" \
+                              "Camera Unit EXIF64 ABI check failed. Use the fixed camera6.0-fix_cos.zip payload."
+                        exit 1
+                    }
             fi
         elif [[ $port_android_version -ge "15" ]];then
             if ensure_resource_available "devices/${base_product_device}/camera5.0-fix_cos.zip"; then

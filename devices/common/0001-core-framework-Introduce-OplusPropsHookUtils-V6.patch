@@ -1,0 +1,2371 @@
+From f8d804750201cfd4e20345b1b0c50fceac73e816 Mon Sep 17 00:00:00 2001
+From: Bruce Teng <torai.d.l@outlook.com>
+Date: Wed, 29 Oct 2025 17:45:56 +0800
+Subject: [PATCH] core/framework: Introduce OplusPropsHookUtils V6
+
+---
+ .../classes/android/app/Instrumentation.smali |    4 +
+ .../util/oplus/OplusPropsHookUtils.smali      | 2329 +++++++++++++++++
+ 2 files changed, 2333 insertions(+)
+ create mode 100644 smali/classes5/com/android/internal/util/oplus/OplusPropsHookUtils.smali
+
+diff --git a/smali/classes/android/app/Instrumentation.smali b/smali/classes/android/app/Instrumentation.smali
+index 4cc0ef7d..70b3c26a 100644
+--- a/smali/classes/android/app/Instrumentation.smali
++++ b/smali/classes/android/app/Instrumentation.smali
+@@ -797,6 +797,8 @@
+ 
+     invoke-virtual {v0, p1}, Landroid/app/Application;->attach(Landroid/content/Context;)V
+ 
++    invoke-static {p1}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->setProps(Landroid/content/Context;)V
++
+     return-object v0
+ .end method
+ 
+@@ -4652,6 +4654,8 @@
+ 
+     invoke-virtual {v0, p3}, Landroid/app/Application;->attach(Landroid/content/Context;)V
+ 
++    invoke-static {p3}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->setProps(Landroid/content/Context;)V
++
+     return-object v0
+ .end method
+ 
+diff --git a/smali/classes5/com/android/internal/util/oplus/OplusPropsHookUtils.smali b/smali/classes5/com/android/internal/util/oplus/OplusPropsHookUtils.smali
+new file mode 100644
+index 00000000..ec0460d7
+--- /dev/null
++++ b/smali/classes5/com/android/internal/util/oplus/OplusPropsHookUtils.smali
+@@ -0,0 +1,2329 @@
++.class public final Lcom/android/internal/util/oplus/OplusPropsHookUtils;
++.super Ljava/lang/Object;
++.source "OplusPropsHookUtils.java"
++
++
++# static fields
++.field private static final blacklist DEBUG:Z
++
++.field private static final blacklist DEFAULT_SPOOF_PACKAGES:[Ljava/lang/String;
++
++.field private static final blacklist DYNAMIC_PACKAGES_PROP:Ljava/lang/String; = "persist.oplus.prophook.packages"
++
++.field private static final blacklist DYNAMIC_PROPS_PROP:Ljava/lang/String; = "persist.oplus.prophook.props"
++
++.field private static final blacklist TAG:Ljava/lang/String;
++
++.field private static blacklist defaultPackages:Ljava/util/Set;
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "Ljava/util/Set<",
++            "Ljava/lang/String;",
++            ">;"
++        }
++    .end annotation
++.end field
++
++.field private static blacklist dynamicPackages:Ljava/util/Set;
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "Ljava/util/Set<",
++            "Ljava/lang/String;",
++            ">;"
++        }
++    .end annotation
++.end field
++
++.field private static blacklist dynamicPropsRules:Ljava/util/Map;
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "Ljava/util/Map<",
++            "Ljava/lang/String;",
++            "Ljava/util/Map<",
++            "Ljava/lang/String;",
++            "Ljava/lang/String;",
++            ">;>;"
++        }
++    .end annotation
++.end field
++
++.field private static final blacklist packagesToChangeBS4:[Ljava/lang/String;
++
++.field private static final blacklist packagesToChangeF5:[Ljava/lang/String;
++
++.field private static final blacklist packagesToChangeLenovoY700:[Ljava/lang/String;
++
++.field private static final blacklist packagesToChangeMI11TP:[Ljava/lang/String;
++
++.field private static final blacklist packagesToChangeMI13P:[Ljava/lang/String;
++
++.field private static final blacklist packagesToChangeOP13T:[Ljava/lang/String;
++
++.field private static final blacklist packagesToChangeOP8P:[Ljava/lang/String;
++
++.field private static final blacklist packagesToChangeOP9P:[Ljava/lang/String;
++
++.field private static final blacklist packagesToChangeOppoFindN5IN:[Ljava/lang/String;
++
++.field private static final blacklist packagesToChangeROG6:[Ljava/lang/String;
++
++.field private static final blacklist packagesToChangeROG6D:[Ljava/lang/String;
++
++.field private static final blacklist packagesToChangeRealmeBrand:[Ljava/lang/String;
++
++.field private static final blacklist packagesToChangeS24U:[Ljava/lang/String;
++
++.field private static final blacklist propsToChangeBS4:Ljava/util/Map;
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "Ljava/util/Map<",
++            "Ljava/lang/String;",
++            "Ljava/lang/Object;",
++            ">;"
++        }
++    .end annotation
++.end field
++
++.field private static final blacklist propsToChangeF5:Ljava/util/Map;
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "Ljava/util/Map<",
++            "Ljava/lang/String;",
++            "Ljava/lang/Object;",
++            ">;"
++        }
++    .end annotation
++.end field
++
++.field private static final blacklist propsToChangeLenovoY700:Ljava/util/Map;
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "Ljava/util/Map<",
++            "Ljava/lang/String;",
++            "Ljava/lang/Object;",
++            ">;"
++        }
++    .end annotation
++.end field
++
++.field private static final blacklist propsToChangeMI11TP:Ljava/util/Map;
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "Ljava/util/Map<",
++            "Ljava/lang/String;",
++            "Ljava/lang/Object;",
++            ">;"
++        }
++    .end annotation
++.end field
++
++.field private static final blacklist propsToChangeMI13P:Ljava/util/Map;
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "Ljava/util/Map<",
++            "Ljava/lang/String;",
++            "Ljava/lang/Object;",
++            ">;"
++        }
++    .end annotation
++.end field
++
++.field private static final blacklist propsToChangeOP13T:Ljava/util/Map;
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "Ljava/util/Map<",
++            "Ljava/lang/String;",
++            "Ljava/lang/Object;",
++            ">;"
++        }
++    .end annotation
++.end field
++
++.field private static final blacklist propsToChangeOP8P:Ljava/util/Map;
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "Ljava/util/Map<",
++            "Ljava/lang/String;",
++            "Ljava/lang/Object;",
++            ">;"
++        }
++    .end annotation
++.end field
++
++.field private static final blacklist propsToChangeOP9P:Ljava/util/Map;
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "Ljava/util/Map<",
++            "Ljava/lang/String;",
++            "Ljava/lang/Object;",
++            ">;"
++        }
++    .end annotation
++.end field
++
++.field private static final blacklist propsToChangeOppoFindN5IN:Ljava/util/Map;
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "Ljava/util/Map<",
++            "Ljava/lang/String;",
++            "Ljava/lang/Object;",
++            ">;"
++        }
++    .end annotation
++.end field
++
++.field private static final blacklist propsToChangeROG6:Ljava/util/Map;
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "Ljava/util/Map<",
++            "Ljava/lang/String;",
++            "Ljava/lang/Object;",
++            ">;"
++        }
++    .end annotation
++.end field
++
++.field private static final blacklist propsToChangeROG6D:Ljava/util/Map;
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "Ljava/util/Map<",
++            "Ljava/lang/String;",
++            "Ljava/lang/Object;",
++            ">;"
++        }
++    .end annotation
++.end field
++
++.field private static final blacklist propsToChangeRealmeBrand:Ljava/util/Map;
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "Ljava/util/Map<",
++            "Ljava/lang/String;",
++            "Ljava/lang/Object;",
++            ">;"
++        }
++    .end annotation
++.end field
++
++.field private static final blacklist propsToChangeS24U:Ljava/util/Map;
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "Ljava/util/Map<",
++            "Ljava/lang/String;",
++            "Ljava/lang/Object;",
++            ">;"
++        }
++    .end annotation
++.end field
++
++.field private static volatile blacklist sProcessName:Ljava/lang/String;
++
++
++# direct methods
++.method static constructor blacklist <clinit>()V
++    .locals 11
++
++    const-class v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;
++
++    invoke-virtual {v0}, Ljava/lang/Class;->getSimpleName()Ljava/lang/String;
++
++    move-result-object v0
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->TAG:Ljava/lang/String;
++
++    const-string v0, "debug.oplus.propshook.log"
++
++    const/4 v1, 0x1
++
++    invoke-static {v0, v1}, Landroid/os/SystemProperties;->getBoolean(Ljava/lang/String;Z)Z
++
++    move-result v0
++
++    sput-boolean v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->DEBUG:Z
++
++    const-string v0, "com.oplus.aiunit"
++
++    const-string v1, "com.heytap.speechassist"
++
++    filled-new-array {v0, v1}, [Ljava/lang/String;
++
++    move-result-object v2
++
++    sput-object v2, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeOP13T:[Ljava/lang/String;
++
++    const-string v2, "com.coloros.smartsidebar"
++
++    filled-new-array {v2}, [Ljava/lang/String;
++
++    move-result-object v2
++
++    sput-object v2, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeRealmeBrand:[Ljava/lang/String;
++
++    const-string v2, "com.oplus.ai.magicstudio"
++
++    filled-new-array {v0, v2}, [Ljava/lang/String;
++
++    move-result-object v3
++
++    sput-object v3, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeOppoFindN5IN:[Ljava/lang/String;
++
++    const-string v3, "com.pearlabyss.blackdesertm"
++
++    const-string v4, "com.pearlabyss.blackdesertm.gl"
++
++    const-string v5, "com.ea.gp.fifamobile"
++
++    const-string v6, "com.gameloft.android.ANMP.GloftA9HM"
++
++    const-string v7, "com.madfingergames.legends"
++
++    filled-new-array {v5, v6, v7, v3, v4}, [Ljava/lang/String;
++
++    move-result-object v3
++
++    sput-object v3, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeROG6:[Ljava/lang/String;
++
++    const-string v3, "com.proxima.dfm"
++
++    filled-new-array {v3}, [Ljava/lang/String;
++
++    move-result-object v3
++
++    sput-object v3, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeROG6D:[Ljava/lang/String;
++
++    const-string v3, "com.tencent.tmgp.kr.codm"
++
++    const-string v4, "com.vng.codmvn"
++
++    const-string v5, "com.activision.callofduty.shooter"
++
++    const-string v6, "com.garena.game.codm"
++
++    filled-new-array {v5, v6, v3, v4}, [Ljava/lang/String;
++
++    move-result-object v3
++
++    sput-object v3, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeLenovoY700:[Ljava/lang/String;
++
++    const-string v9, "com.riotgames.league.teamfighttacticstw"
++
++    const-string v10, "com.riotgames.league.teamfighttacticsvn"
++
++    const-string v4, "com.netease.lztgglobal"
++
++    const-string v5, "com.riotgames.league.wildrift"
++
++    const-string v6, "com.riotgames.league.wildrifttw"
++
++    const-string v7, "com.riotgames.league.wildriftvn"
++
++    const-string v8, "com.riotgames.league.teamfighttactics"
++
++    filled-new-array/range {v4 .. v10}, [Ljava/lang/String;
++
++    move-result-object v3
++
++    sput-object v3, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeOP8P:[Ljava/lang/String;
++
++    const-string v3, "com.epicgames.portal"
++
++    const-string v4, "com.tencent.lolm"
++
++    const-string v5, "com.epicgames.fortnite"
++
++    filled-new-array {v5, v3, v4}, [Ljava/lang/String;
++
++    move-result-object v3
++
++    sput-object v3, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeOP9P:[Ljava/lang/String;
++
++    const-string v3, "com.supercell.clashofclans"
++
++    const-string v4, "com.vng.mlbbvn"
++
++    const-string v5, "com.ea.gp.apexlegendsmobilefps"
++
++    const-string v6, "com.levelinfinite.hotta.gp"
++
++    filled-new-array {v5, v6, v3, v4}, [Ljava/lang/String;
++
++    move-result-object v3
++
++    sput-object v3, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeMI11TP:[Ljava/lang/String;
++
++    const-string v3, "com.levelinfinite.sgameGlobal"
++
++    const-string v4, "com.tencent.tmgp.sgame"
++
++    filled-new-array {v3, v4}, [Ljava/lang/String;
++
++    move-result-object v3
++
++    sput-object v3, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeMI13P:[Ljava/lang/String;
++
++    const-string v3, "com.dts.freefireth"
++
++    const-string v4, "com.mobile.legends"
++
++    const-string v5, "com.dts.freefiremax"
++
++    filled-new-array {v5, v3, v4}, [Ljava/lang/String;
++
++    move-result-object v3
++
++    sput-object v3, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeF5:[Ljava/lang/String;
++
++    const-string v3, "com.proximabeta.mf.uamo"
++
++    filled-new-array {v3}, [Ljava/lang/String;
++
++    move-result-object v3
++
++    sput-object v3, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeBS4:[Ljava/lang/String;
++
++    const-string v9, "com.tencent.tmgp.pubgmhd"
++
++    const-string v10, "com.vng.pubgmobile"
++
++    const-string v4, "com.blizzard.diablo.immortal"
++
++    const-string v5, "com.pubg.imobile"
++
++    const-string v6, "com.pubg.krmobile"
++
++    const-string v7, "com.rekoo.pubgm"
++
++    const-string v8, "com.tencent.ig"
++
++    filled-new-array/range {v4 .. v10}, [Ljava/lang/String;
++
++    move-result-object v3
++
++    sput-object v3, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeS24U:[Ljava/lang/String;
++
++    filled-new-array {v0, v1, v2}, [Ljava/lang/String;
++
++    move-result-object v0
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->DEFAULT_SPOOF_PACKAGES:[Ljava/lang/String;
++
++    new-instance v0, Ljava/util/HashMap;
++
++    invoke-direct {v0}, Ljava/util/HashMap;-><init>()V
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dynamicPropsRules:Ljava/util/Map;
++
++    new-instance v0, Ljava/util/HashSet;
++
++    invoke-direct {v0}, Ljava/util/HashSet;-><init>()V
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dynamicPackages:Ljava/util/Set;
++
++    new-instance v0, Ljava/util/HashSet;
++
++    invoke-direct {v0}, Ljava/util/HashSet;-><init>()V
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->defaultPackages:Ljava/util/Set;
++
++    new-instance v0, Ljava/util/HashMap;
++
++    invoke-direct {v0}, Ljava/util/HashMap;-><init>()V
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOP13T:Ljava/util/Map;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOP13T:Ljava/util/Map;
++
++    const-string v1, "PKX110"
++
++    const-string v2, "MODEL"
++
++    invoke-interface {v0, v2, v1}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOP13T:Ljava/util/Map;
++
++    const-string v1, "BRAND"
++
++    const-string v3, "OnePlus"
++
++    invoke-interface {v0, v1, v3}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    new-instance v0, Ljava/util/HashMap;
++
++    invoke-direct {v0}, Ljava/util/HashMap;-><init>()V
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOppoFindN5IN:Ljava/util/Map;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOppoFindN5IN:Ljava/util/Map;
++
++    const-string v4, "CPH2671"
++
++    invoke-interface {v0, v2, v4}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    new-instance v0, Ljava/util/HashMap;
++
++    invoke-direct {v0}, Ljava/util/HashMap;-><init>()V
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeRealmeBrand:Ljava/util/Map;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeRealmeBrand:Ljava/util/Map;
++
++    const-string v4, "realme"
++
++    invoke-interface {v0, v1, v4}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    new-instance v0, Ljava/util/HashMap;
++
++    invoke-direct {v0}, Ljava/util/HashMap;-><init>()V
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeROG6:Ljava/util/Map;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeROG6:Ljava/util/Map;
++
++    const-string v4, "asus"
++
++    invoke-interface {v0, v1, v4}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeROG6:Ljava/util/Map;
++
++    const-string v5, "MANUFACTURER"
++
++    invoke-interface {v0, v5, v4}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeROG6:Ljava/util/Map;
++
++    const-string v6, "AI2201"
++
++    const-string v7, "DEVICE"
++
++    invoke-interface {v0, v7, v6}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeROG6:Ljava/util/Map;
++
++    const-string v6, "ASUS_AI2201"
++
++    invoke-interface {v0, v2, v6}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    new-instance v0, Ljava/util/HashMap;
++
++    invoke-direct {v0}, Ljava/util/HashMap;-><init>()V
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeROG6D:Ljava/util/Map;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeROG6D:Ljava/util/Map;
++
++    invoke-interface {v0, v1, v4}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeROG6D:Ljava/util/Map;
++
++    invoke-interface {v0, v5, v4}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeROG6D:Ljava/util/Map;
++
++    const-string v4, "AI2203_C"
++
++    invoke-interface {v0, v7, v4}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeROG6D:Ljava/util/Map;
++
++    const-string v4, "ASUS_AI2203_C"
++
++    invoke-interface {v0, v2, v4}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    new-instance v0, Ljava/util/HashMap;
++
++    invoke-direct {v0}, Ljava/util/HashMap;-><init>()V
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeLenovoY700:Ljava/util/Map;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeLenovoY700:Ljava/util/Map;
++
++    const-string v4, "Lenovo TB-9707F"
++
++    invoke-interface {v0, v2, v4}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeLenovoY700:Ljava/util/Map;
++
++    const-string v4, "lenovo"
++
++    invoke-interface {v0, v5, v4}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    new-instance v0, Ljava/util/HashMap;
++
++    invoke-direct {v0}, Ljava/util/HashMap;-><init>()V
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOP8P:Ljava/util/Map;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOP8P:Ljava/util/Map;
++
++    const-string v4, "IN2020"
++
++    invoke-interface {v0, v2, v4}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOP8P:Ljava/util/Map;
++
++    invoke-interface {v0, v5, v3}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    new-instance v0, Ljava/util/HashMap;
++
++    invoke-direct {v0}, Ljava/util/HashMap;-><init>()V
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOP9P:Ljava/util/Map;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOP9P:Ljava/util/Map;
++
++    const-string v4, "LE2123"
++
++    invoke-interface {v0, v2, v4}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOP9P:Ljava/util/Map;
++
++    invoke-interface {v0, v5, v3}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    new-instance v0, Ljava/util/HashMap;
++
++    invoke-direct {v0}, Ljava/util/HashMap;-><init>()V
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeMI11TP:Ljava/util/Map;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeMI11TP:Ljava/util/Map;
++
++    const-string v3, "2107113SI"
++
++    invoke-interface {v0, v2, v3}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeMI11TP:Ljava/util/Map;
++
++    const-string v3, "Xiaomi"
++
++    invoke-interface {v0, v5, v3}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    new-instance v0, Ljava/util/HashMap;
++
++    invoke-direct {v0}, Ljava/util/HashMap;-><init>()V
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeMI13P:Ljava/util/Map;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeMI13P:Ljava/util/Map;
++
++    invoke-interface {v0, v1, v3}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeMI13P:Ljava/util/Map;
++
++    invoke-interface {v0, v5, v3}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeMI13P:Ljava/util/Map;
++
++    const-string v4, "2210132C"
++
++    invoke-interface {v0, v2, v4}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    new-instance v0, Ljava/util/HashMap;
++
++    invoke-direct {v0}, Ljava/util/HashMap;-><init>()V
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeF5:Ljava/util/Map;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeF5:Ljava/util/Map;
++
++    const-string v4, "23049PCD8G"
++
++    invoke-interface {v0, v2, v4}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeF5:Ljava/util/Map;
++
++    invoke-interface {v0, v5, v3}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    new-instance v0, Ljava/util/HashMap;
++
++    invoke-direct {v0}, Ljava/util/HashMap;-><init>()V
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeBS4:Ljava/util/Map;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeBS4:Ljava/util/Map;
++
++    const-string v3, "2SM-X706B"
++
++    invoke-interface {v0, v2, v3}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeBS4:Ljava/util/Map;
++
++    const-string v3, "blackshark"
++
++    invoke-interface {v0, v5, v3}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    new-instance v0, Ljava/util/HashMap;
++
++    invoke-direct {v0}, Ljava/util/HashMap;-><init>()V
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeS24U:Ljava/util/Map;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeS24U:Ljava/util/Map;
++
++    const-string v3, "SAMSUNG"
++
++    invoke-interface {v0, v1, v3}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeS24U:Ljava/util/Map;
++
++    const-string v1, "samsung"
++
++    invoke-interface {v0, v5, v1}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeS24U:Ljava/util/Map;
++
++    const-string v1, "SM-S928B"
++
++    invoke-interface {v0, v2, v1}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->defaultPackages:Ljava/util/Set;
++
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->DEFAULT_SPOOF_PACKAGES:[Ljava/lang/String;
++
++    invoke-static {v0, v1}, Ljava/util/Collections;->addAll(Ljava/util/Collection;[Ljava/lang/Object;)Z
++
++    invoke-static {}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->parseDynamicRules()V
++
++    return-void
++.end method
++
++.method public constructor blacklist <init>()V
++    .locals 0
++
++    invoke-direct {p0}, Ljava/lang/Object;-><init>()V
++
++    return-void
++.end method
++
++.method private static blacklist applyDynamicRules(Ljava/lang/String;)Z
++    .locals 3
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dynamicPropsRules:Ljava/util/Map;
++
++    invoke-interface {v0, p0}, Ljava/util/Map;->get(Ljava/lang/Object;)Ljava/lang/Object;
++
++    move-result-object v0
++
++    check-cast v0, Ljava/util/Map;
++
++    sget-boolean v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->DEBUG:Z
++
++    if-eqz v0, :cond_2
++
++    invoke-interface {v0}, Ljava/util/Map;->isEmpty()Z
++
++    move-result v2
++
++    if-eqz v2, :cond_0
++
++    goto :goto_1
++
++    :cond_0
++    invoke-interface {v0}, Ljava/util/Map;->entrySet()Ljava/util/Set;
++
++    move-result-object p0
++
++    invoke-interface {p0}, Ljava/util/Set;->iterator()Ljava/util/Iterator;
++
++    move-result-object p0
++
++    :goto_0
++    invoke-interface {p0}, Ljava/util/Iterator;->hasNext()Z
++
++    move-result v0
++
++    if-eqz v0, :cond_1
++
++    invoke-interface {p0}, Ljava/util/Iterator;->next()Ljava/lang/Object;
++
++    move-result-object v0
++
++    check-cast v0, Ljava/util/Map$Entry;
++
++    invoke-interface {v0}, Ljava/util/Map$Entry;->getKey()Ljava/lang/Object;
++
++    move-result-object v1
++
++    check-cast v1, Ljava/lang/String;
++
++    invoke-interface {v0}, Ljava/util/Map$Entry;->getValue()Ljava/lang/Object;
++
++    move-result-object v0
++
++    invoke-static {v1, v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->setPropValue(Ljava/lang/String;Ljava/lang/Object;)V
++
++    nop
++
++    const/4 v1, 0x1
++
++    goto :goto_0
++
++    :cond_1
++    return v1
++
++    :cond_2
++    :goto_1
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "No dynamic rules defined for "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object p0
++
++    const-string v0, ", skipping"
++
++    invoke-virtual {p0, v0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object p0
++
++    invoke-virtual {p0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object p0
++
++    invoke-static {p0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    sget-boolean p0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->DEBUG:Z
++
++    return p0
++.end method
++
++.method private static blacklist applyRuleSet(Ljava/util/Map;)Z
++    .locals 2
++    .annotation system Ldalvik/annotation/Signature;
++        value = {
++            "(",
++            "Ljava/util/Map<",
++            "Ljava/lang/String;",
++            "Ljava/lang/Object;",
++            ">;)Z"
++        }
++    .end annotation
++
++    invoke-interface {p0}, Ljava/util/Map;->entrySet()Ljava/util/Set;
++
++    move-result-object p0
++
++    invoke-interface {p0}, Ljava/util/Set;->iterator()Ljava/util/Iterator;
++
++    move-result-object p0
++
++    :goto_0
++    invoke-interface {p0}, Ljava/util/Iterator;->hasNext()Z
++
++    move-result v0
++
++    if-eqz v0, :cond_0
++
++    invoke-interface {p0}, Ljava/util/Iterator;->next()Ljava/lang/Object;
++
++    move-result-object v0
++
++    check-cast v0, Ljava/util/Map$Entry;
++
++    invoke-interface {v0}, Ljava/util/Map$Entry;->getKey()Ljava/lang/Object;
++
++    move-result-object v1
++
++    check-cast v1, Ljava/lang/String;
++
++    invoke-interface {v0}, Ljava/util/Map$Entry;->getValue()Ljava/lang/Object;
++
++    move-result-object v0
++
++    invoke-static {v1, v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->setPropValue(Ljava/lang/String;Ljava/lang/Object;)V
++
++    goto :goto_0
++
++    :cond_0
++    const/4 p0, 0x1
++
++    return p0
++.end method
++
++.method public static blacklist dlog(Ljava/lang/String;)V
++    .locals 3
++
++    sget-boolean v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->DEBUG:Z
++
++    if-eqz v0, :cond_0
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->TAG:Ljava/lang/String;
++
++    new-instance v1, Ljava/lang/StringBuilder;
++
++    invoke-direct {v1}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v2, "["
++
++    invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v1
++
++    sget-object v2, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->sProcessName:Ljava/lang/String;
++
++    invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v1
++
++    const-string v2, "] "
++
++    invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v1
++
++    invoke-virtual {v1, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object p0
++
++    invoke-virtual {p0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object p0
++
++    invoke-static {v0, p0}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
++
++    :cond_0
++    return-void
++.end method
++
++.method private static blacklist getBuildClassField(Ljava/lang/String;)Ljava/lang/reflect/Field;
++    .locals 1
++    .annotation system Ldalvik/annotation/Throws;
++        value = {
++            Ljava/lang/NoSuchFieldException;
++        }
++    .end annotation
++
++    :try_start_0
++    const-class v0, Landroid/os/Build;
++
++    invoke-virtual {v0, p0}, Ljava/lang/Class;->getDeclaredField(Ljava/lang/String;)Ljava/lang/reflect/Field;
++
++    move-result-object p0
++    :try_end_0
++    .catch Ljava/lang/NoSuchFieldException; {:try_start_0 .. :try_end_0} :catch_0
++
++    return-object p0
++
++    :catch_0
++    move-exception v0
++
++    const-class v0, Landroid/os/Build$VERSION;
++
++    invoke-virtual {v0, p0}, Ljava/lang/Class;->getDeclaredField(Ljava/lang/String;)Ljava/lang/reflect/Field;
++
++    move-result-object p0
++
++    return-object p0
++.end method
++
++.method public static blacklist isColorOSCN()Z
++    .locals 2
++
++    const-string v0, "ro.oplus.image.system_ext.area"
++
++    invoke-static {v0}, Landroid/os/SystemProperties;->get(Ljava/lang/String;)Ljava/lang/String;
++
++    move-result-object v0
++
++    const-string v1, "domestic"
++
++    invoke-virtual {v1, v0}, Ljava/lang/Object;->equals(Ljava/lang/Object;)Z
++
++    move-result v0
++
++    return v0
++.end method
++
++.method private static blacklist parseDynamicRules()V
++    .locals 14
++
++    const-string v0, "persist.oplus.prophook.packages"
++
++    const-string v1, ""
++
++    invoke-static {v0, v1}, Landroid/os/SystemProperties;->get(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Landroid/text/TextUtils;->isEmpty(Ljava/lang/CharSequence;)Z
++
++    move-result v2
++
++    const-string v3, ","
++
++    if-nez v2, :cond_0
++
++    new-instance v2, Ljava/lang/StringBuilder;
++
++    invoke-direct {v2}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v4, "packageList = "
++
++    invoke-virtual {v2, v4}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v2
++
++    invoke-virtual {v2, v0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v2
++
++    invoke-virtual {v2}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v2
++
++    invoke-static {v2}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    sget-object v2, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dynamicPackages:Ljava/util/Set;
++
++    invoke-virtual {v0, v3}, Ljava/lang/String;->split(Ljava/lang/String;)[Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v2, v0}, Ljava/util/Collections;->addAll(Ljava/util/Collection;[Ljava/lang/Object;)Z
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v2, "Dynamic packages: "
++
++    invoke-virtual {v0, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    sget-object v2, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dynamicPackages:Ljava/util/Set;
++
++    invoke-virtual {v0, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/Object;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    :cond_0
++    const-string v0, "persist.oplus.prophook.props"
++
++    invoke-static {v0, v1}, Landroid/os/SystemProperties;->get(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Landroid/text/TextUtils;->isEmpty(Ljava/lang/CharSequence;)Z
++
++    move-result v1
++
++    if-nez v1, :cond_4
++
++    const-string v1, ";"
++
++    invoke-virtual {v0, v1}, Ljava/lang/String;->split(Ljava/lang/String;)[Ljava/lang/String;
++
++    move-result-object v0
++
++    array-length v1, v0
++
++    const/4 v2, 0x0
++
++    move v4, v2
++
++    :goto_0
++    if-ge v4, v1, :cond_4
++
++    aget-object v5, v0, v4
++
++    const-string v6, ":"
++
++    const/4 v7, 0x2
++
++    invoke-virtual {v5, v6, v7}, Ljava/lang/String;->split(Ljava/lang/String;I)[Ljava/lang/String;
++
++    move-result-object v5
++
++    array-length v6, v5
++
++    if-ne v6, v7, :cond_3
++
++    aget-object v6, v5, v2
++
++    invoke-virtual {v6}, Ljava/lang/String;->trim()Ljava/lang/String;
++
++    move-result-object v6
++
++    new-instance v8, Ljava/util/HashMap;
++
++    invoke-direct {v8}, Ljava/util/HashMap;-><init>()V
++
++    const/4 v9, 0x1
++
++    aget-object v5, v5, v9
++
++    invoke-virtual {v5, v3}, Ljava/lang/String;->split(Ljava/lang/String;)[Ljava/lang/String;
++
++    move-result-object v5
++
++    array-length v10, v5
++
++    move v11, v2
++
++    :goto_1
++    if-ge v11, v10, :cond_2
++
++    aget-object v12, v5, v11
++
++    const-string v13, ":"
++
++    invoke-virtual {v12, v13, v7}, Ljava/lang/String;->split(Ljava/lang/String;I)[Ljava/lang/String;
++
++    move-result-object v12
++
++    array-length v13, v12
++
++    if-ne v13, v7, :cond_1
++
++    aget-object v13, v12, v2
++
++    invoke-virtual {v13}, Ljava/lang/String;->trim()Ljava/lang/String;
++
++    move-result-object v13
++
++    aget-object v12, v12, v9
++
++    invoke-virtual {v12}, Ljava/lang/String;->trim()Ljava/lang/String;
++
++    move-result-object v12
++
++    invoke-virtual {v8, v13, v12}, Ljava/util/HashMap;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    :cond_1
++    add-int/lit8 v11, v11, 0x1
++
++    goto :goto_1
++
++    :cond_2
++    invoke-virtual {v8}, Ljava/util/HashMap;->isEmpty()Z
++
++    move-result v5
++
++    if-nez v5, :cond_3
++
++    sget-object v5, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dynamicPropsRules:Ljava/util/Map;
++
++    invoke-interface {v5, v6, v8}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    new-instance v5, Ljava/lang/StringBuilder;
++
++    invoke-direct {v5}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v7, "Dynamic rules for "
++
++    invoke-virtual {v5, v7}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v5
++
++    invoke-virtual {v5, v6}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v5
++
++    const-string v6, ": "
++
++    invoke-virtual {v5, v6}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v5
++
++    invoke-virtual {v5, v8}, Ljava/lang/StringBuilder;->append(Ljava/lang/Object;)Ljava/lang/StringBuilder;
++
++    move-result-object v5
++
++    invoke-virtual {v5}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v5
++
++    invoke-static {v5}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    :cond_3
++    add-int/lit8 v4, v4, 0x1
++
++    goto :goto_0
++
++    :cond_4
++    return-void
++.end method
++
++.method private static blacklist parseDynamicRules(Ljava/lang/String;)V
++    .locals 9
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "persist.oplus.prophook."
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    const-string v1, ""
++
++    invoke-static {v0, v1}, Landroid/os/SystemProperties;->get(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
++
++    move-result-object v1
++
++    invoke-virtual {v1}, Ljava/lang/String;->trim()Ljava/lang/String;
++
++    move-result-object v1
++
++    invoke-virtual {v1}, Ljava/lang/String;->isEmpty()Z
++
++    move-result v2
++
++    if-nez v2, :cond_2
++
++    new-instance v2, Ljava/util/HashMap;
++
++    invoke-direct {v2}, Ljava/util/HashMap;-><init>()V
++
++    const-string v3, ","
++
++    invoke-virtual {v1, v3}, Ljava/lang/String;->split(Ljava/lang/String;)[Ljava/lang/String;
++
++    move-result-object v1
++
++    array-length v3, v1
++
++    const/4 v4, 0x0
++
++    move v5, v4
++
++    :goto_0
++    if-ge v5, v3, :cond_1
++
++    aget-object v6, v1, v5
++
++    const-string v7, ":"
++
++    const/4 v8, 0x2
++
++    invoke-virtual {v6, v7, v8}, Ljava/lang/String;->split(Ljava/lang/String;I)[Ljava/lang/String;
++
++    move-result-object v6
++
++    array-length v7, v6
++
++    if-ne v7, v8, :cond_0
++
++    aget-object v7, v6, v4
++
++    invoke-virtual {v7}, Ljava/lang/String;->trim()Ljava/lang/String;
++
++    move-result-object v7
++
++    const/4 v8, 0x1
++
++    aget-object v6, v6, v8
++
++    invoke-virtual {v6}, Ljava/lang/String;->trim()Ljava/lang/String;
++
++    move-result-object v6
++
++    invoke-interface {v2, v7, v6}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    :cond_0
++    add-int/lit8 v5, v5, 0x1
++
++    goto :goto_0
++
++    :cond_1
++    invoke-interface {v2}, Ljava/util/Map;->isEmpty()Z
++
++    move-result v1
++
++    if-nez v1, :cond_2
++
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dynamicPropsRules:Ljava/util/Map;
++
++    invoke-interface {v1, p0, v2}, Ljava/util/Map;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
++
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dynamicPackages:Ljava/util/Set;
++
++    invoke-interface {v1, p0}, Ljava/util/Set;->add(Ljava/lang/Object;)Z
++
++    new-instance v1, Ljava/lang/StringBuilder;
++
++    invoke-direct {v1}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v3, "Loaded rules from "
++
++    invoke-virtual {v1, v3}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v1
++
++    invoke-virtual {v1, v0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    const-string v1, " for "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object p0
++
++    const-string v0, ": "
++
++    invoke-virtual {p0, v0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object p0
++
++    invoke-virtual {p0, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/Object;)Ljava/lang/StringBuilder;
++
++    move-result-object p0
++
++    invoke-virtual {p0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object p0
++
++    invoke-static {p0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    :cond_2
++    return-void
++.end method
++
++.method private static blacklist setPropValue(Ljava/lang/String;Ljava/lang/Object;)V
++    .locals 4
++
++    :try_start_0
++    invoke-static {p0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->getBuildClassField(Ljava/lang/String;)Ljava/lang/reflect/Field;
++
++    move-result-object v0
++
++    if-eqz v0, :cond_7
++
++    const/4 v1, 0x1
++
++    invoke-virtual {v0, v1}, Ljava/lang/reflect/Field;->setAccessible(Z)V
++
++    invoke-virtual {v0}, Ljava/lang/reflect/Field;->getType()Ljava/lang/Class;
++
++    move-result-object v1
++
++    sget-object v2, Ljava/lang/Integer;->TYPE:Ljava/lang/Class;
++
++    const/4 v3, 0x0
++
++    if-ne v1, v2, :cond_1
++
++    instance-of v1, p1, Ljava/lang/String;
++
++    if-eqz v1, :cond_0
++
++    move-object v1, p1
++
++    check-cast v1, Ljava/lang/String;
++
++    invoke-static {v1}, Ljava/lang/Integer;->parseInt(Ljava/lang/String;)I
++
++    move-result v1
++
++    invoke-static {v1}, Ljava/lang/Integer;->valueOf(I)Ljava/lang/Integer;
++
++    move-result-object v1
++
++    invoke-virtual {v0, v3, v1}, Ljava/lang/reflect/Field;->set(Ljava/lang/Object;Ljava/lang/Object;)V
++
++    goto :goto_0
++
++    :cond_0
++    instance-of v1, p1, Ljava/lang/Integer;
++
++    if-eqz v1, :cond_6
++
++    move-object v1, p1
++
++    check-cast v1, Ljava/lang/Integer;
++
++    invoke-virtual {v0, v3, v1}, Ljava/lang/reflect/Field;->set(Ljava/lang/Object;Ljava/lang/Object;)V
++
++    goto :goto_0
++
++    :cond_1
++    sget-object v2, Ljava/lang/Long;->TYPE:Ljava/lang/Class;
++
++    if-ne v1, v2, :cond_3
++
++    instance-of v1, p1, Ljava/lang/String;
++
++    if-eqz v1, :cond_2
++
++    move-object v1, p1
++
++    check-cast v1, Ljava/lang/String;
++
++    invoke-static {v1}, Ljava/lang/Long;->parseLong(Ljava/lang/String;)J
++
++    move-result-wide v1
++
++    invoke-static {v1, v2}, Ljava/lang/Long;->valueOf(J)Ljava/lang/Long;
++
++    move-result-object v1
++
++    invoke-virtual {v0, v3, v1}, Ljava/lang/reflect/Field;->set(Ljava/lang/Object;Ljava/lang/Object;)V
++
++    goto :goto_0
++
++    :cond_2
++    instance-of v1, p1, Ljava/lang/Long;
++
++    if-eqz v1, :cond_6
++
++    move-object v1, p1
++
++    check-cast v1, Ljava/lang/Long;
++
++    invoke-virtual {v0, v3, v1}, Ljava/lang/reflect/Field;->set(Ljava/lang/Object;Ljava/lang/Object;)V
++
++    goto :goto_0
++
++    :cond_3
++    sget-object v2, Ljava/lang/Boolean;->TYPE:Ljava/lang/Class;
++
++    if-ne v1, v2, :cond_5
++
++    instance-of v1, p1, Ljava/lang/String;
++
++    if-eqz v1, :cond_4
++
++    move-object v1, p1
++
++    check-cast v1, Ljava/lang/String;
++
++    invoke-static {v1}, Ljava/lang/Boolean;->parseBoolean(Ljava/lang/String;)Z
++
++    move-result v1
++
++    invoke-static {v1}, Ljava/lang/Boolean;->valueOf(Z)Ljava/lang/Boolean;
++
++    move-result-object v1
++
++    invoke-virtual {v0, v3, v1}, Ljava/lang/reflect/Field;->set(Ljava/lang/Object;Ljava/lang/Object;)V
++
++    goto :goto_0
++
++    :cond_4
++    instance-of v1, p1, Ljava/lang/Boolean;
++
++    if-eqz v1, :cond_6
++
++    move-object v1, p1
++
++    check-cast v1, Ljava/lang/Boolean;
++
++    invoke-virtual {v0, v3, v1}, Ljava/lang/reflect/Field;->set(Ljava/lang/Object;Ljava/lang/Object;)V
++
++    goto :goto_0
++
++    :cond_5
++    invoke-virtual {p1}, Ljava/lang/Object;->toString()Ljava/lang/String;
++
++    move-result-object v1
++
++    invoke-virtual {v0, v3, v1}, Ljava/lang/reflect/Field;->set(Ljava/lang/Object;Ljava/lang/Object;)V
++
++    :cond_6
++    :goto_0
++    sget-boolean v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->DEBUG:Z
++
++    invoke-virtual {v0, v1}, Ljava/lang/reflect/Field;->setAccessible(Z)V
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "[SpoofProp] Set "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    const-string v1, " to "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p1}, Ljava/lang/StringBuilder;->append(Ljava/lang/Object;)Ljava/lang/StringBuilder;
++
++    move-result-object p1
++
++    invoke-virtual {p1}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object p1
++
++    invoke-static {p1}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    return-void
++
++    :cond_7
++    sget-object p1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->TAG:Ljava/lang/String;
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "Field "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    const-string v1, " not found in Build or Build.VERSION classes"
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {p1, v0}, Landroid/util/Log;->e(Ljava/lang/String;Ljava/lang/String;)I
++    :try_end_0
++    .catch Ljava/lang/Exception; {:try_start_0 .. :try_end_0} :catch_0
++
++    goto :goto_1
++
++    :catch_0
++    move-exception p1
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->TAG:Ljava/lang/String;
++
++    new-instance v1, Ljava/lang/StringBuilder;
++
++    invoke-direct {v1}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v2, "Failed to spoof prop "
++
++    invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v1
++
++    invoke-virtual {v1, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object p0
++
++    const-string v1, ": "
++
++    invoke-virtual {p0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object p0
++
++    invoke-virtual {p1}, Ljava/lang/Exception;->getMessage()Ljava/lang/String;
++
++    move-result-object v1
++
++    invoke-virtual {p0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object p0
++
++    invoke-virtual {p0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object p0
++
++    invoke-static {v0, p0, p1}, Landroid/util/Log;->e(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)I
++
++    :goto_1
++    return-void
++.end method
++
++.method public static blacklist setProps(Landroid/content/Context;)V
++    .locals 4
++
++    invoke-virtual {p0}, Landroid/content/Context;->getPackageName()Ljava/lang/String;
++
++    move-result-object p0
++
++    invoke-static {}, Landroid/app/Application;->getProcessName()Ljava/lang/String;
++
++    move-result-object v0
++
++    sput-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->sProcessName:Ljava/lang/String;
++
++    invoke-static {p0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->parseDynamicRules(Ljava/lang/String;)V
++
++    sget-boolean v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->DEBUG:Z
++
++    if-eqz v1, :cond_0
++
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->TAG:Ljava/lang/String;
++
++    const-string v2, "======[Spoof Init]======"
++
++    invoke-static {v1, v2}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
++
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->TAG:Ljava/lang/String;
++
++    new-instance v2, Ljava/lang/StringBuilder;
++
++    invoke-direct {v2}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v3, "Package: "
++
++    invoke-virtual {v2, v3}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v2
++
++    invoke-virtual {v2, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v2
++
++    invoke-virtual {v2}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v2
++
++    invoke-static {v1, v2}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
++
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->TAG:Ljava/lang/String;
++
++    new-instance v2, Ljava/lang/StringBuilder;
++
++    invoke-direct {v2}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v3, "Process: "
++
++    invoke-virtual {v2, v3}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v2
++
++    invoke-virtual {v2, v0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v1, v0}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->TAG:Ljava/lang/String;
++
++    new-instance v1, Ljava/lang/StringBuilder;
++
++    invoke-direct {v1}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v2, "isColorOSCN: "
++
++    invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v1
++
++    invoke-static {}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->isColorOSCN()Z
++
++    move-result v2
++
++    invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Z)Ljava/lang/StringBuilder;
++
++    move-result-object v1
++
++    invoke-virtual {v1}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v1
++
++    invoke-static {v0, v1}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
++
++    :cond_0
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dynamicPackages:Ljava/util/Set;
++
++    invoke-interface {v0, p0}, Ljava/util/Set;->contains(Ljava/lang/Object;)Z
++
++    move-result v0
++
++    if-nez v0, :cond_1
++
++    sget-boolean v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->DEBUG:Z
++
++    goto :goto_0
++
++    :cond_1
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "Matched dynamic package: "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    invoke-static {p0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->applyDynamicRules(Ljava/lang/String;)Z
++
++    move-result v0
++
++    :goto_0
++    if-nez v0, :cond_3
++
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->defaultPackages:Ljava/util/Set;
++
++    invoke-interface {v1, p0}, Ljava/util/Set;->contains(Ljava/lang/Object;)Z
++
++    move-result v1
++
++    if-eqz v1, :cond_3
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "Applying default rules for package: "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    invoke-static {}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->isColorOSCN()Z
++
++    move-result v0
++
++    if-eqz v0, :cond_2
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOP13T:Ljava/util/Map;
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->applyRuleSet(Ljava/util/Map;)Z
++
++    move-result v0
++
++    goto :goto_1
++
++    :cond_2
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOppoFindN5IN:Ljava/util/Map;
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->applyRuleSet(Ljava/util/Map;)Z
++
++    move-result v0
++
++    :cond_3
++    :goto_1
++    if-nez v0, :cond_5
++
++    invoke-static {}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->isColorOSCN()Z
++
++    move-result v1
++
++    if-eqz v1, :cond_4
++
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeOP13T:[Ljava/lang/String;
++
++    invoke-static {v1}, Ljava/util/Arrays;->asList([Ljava/lang/Object;)Ljava/util/List;
++
++    move-result-object v1
++
++    invoke-interface {v1, p0}, Ljava/util/List;->contains(Ljava/lang/Object;)Z
++
++    move-result v1
++
++    if-eqz v1, :cond_5
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "Matched OnePlus 13T package: "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOP13T:Ljava/util/Map;
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->applyRuleSet(Ljava/util/Map;)Z
++
++    move-result v0
++
++    goto :goto_2
++
++    :cond_4
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeOppoFindN5IN:[Ljava/lang/String;
++
++    invoke-static {v1}, Ljava/util/Arrays;->asList([Ljava/lang/Object;)Ljava/util/List;
++
++    move-result-object v1
++
++    invoke-interface {v1, p0}, Ljava/util/List;->contains(Ljava/lang/Object;)Z
++
++    move-result v1
++
++    if-eqz v1, :cond_5
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "Matched Oppo Find N5 IN package: "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOppoFindN5IN:Ljava/util/Map;
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->applyRuleSet(Ljava/util/Map;)Z
++
++    move-result v0
++
++    :cond_5
++    :goto_2
++    if-nez v0, :cond_6
++
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeRealmeBrand:[Ljava/lang/String;
++
++    invoke-static {v1}, Ljava/util/Arrays;->asList([Ljava/lang/Object;)Ljava/util/List;
++
++    move-result-object v1
++
++    invoke-interface {v1, p0}, Ljava/util/List;->contains(Ljava/lang/Object;)Z
++
++    move-result v1
++
++    if-eqz v1, :cond_6
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "Matched Realme brand spoof for: "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeRealmeBrand:Ljava/util/Map;
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->applyRuleSet(Ljava/util/Map;)Z
++
++    move-result v0
++
++    :cond_6
++    if-nez v0, :cond_10
++
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeROG6:[Ljava/lang/String;
++
++    invoke-static {v1}, Ljava/util/Arrays;->asList([Ljava/lang/Object;)Ljava/util/List;
++
++    move-result-object v1
++
++    invoke-interface {v1, p0}, Ljava/util/List;->contains(Ljava/lang/Object;)Z
++
++    move-result v1
++
++    if-eqz v1, :cond_7
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "Matched RoG6 package: "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeROG6:Ljava/util/Map;
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->applyRuleSet(Ljava/util/Map;)Z
++
++    move-result v0
++
++    goto/16 :goto_3
++
++    :cond_7
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeROG6D:[Ljava/lang/String;
++
++    invoke-static {v1}, Ljava/util/Arrays;->asList([Ljava/lang/Object;)Ljava/util/List;
++
++    move-result-object v1
++
++    invoke-interface {v1, p0}, Ljava/util/List;->contains(Ljava/lang/Object;)Z
++
++    move-result v1
++
++    if-eqz v1, :cond_8
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "Matched ROG6D package: "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeROG6D:Ljava/util/Map;
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->applyRuleSet(Ljava/util/Map;)Z
++
++    move-result v0
++
++    goto/16 :goto_3
++
++    :cond_8
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeLenovoY700:[Ljava/lang/String;
++
++    invoke-static {v1}, Ljava/util/Arrays;->asList([Ljava/lang/Object;)Ljava/util/List;
++
++    move-result-object v1
++
++    invoke-interface {v1, p0}, Ljava/util/List;->contains(Ljava/lang/Object;)Z
++
++    move-result v1
++
++    if-eqz v1, :cond_9
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "Matched LenovoY700 package: "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeLenovoY700:Ljava/util/Map;
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->applyRuleSet(Ljava/util/Map;)Z
++
++    move-result v0
++
++    goto/16 :goto_3
++
++    :cond_9
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeOP8P:[Ljava/lang/String;
++
++    invoke-static {v1}, Ljava/util/Arrays;->asList([Ljava/lang/Object;)Ljava/util/List;
++
++    move-result-object v1
++
++    invoke-interface {v1, p0}, Ljava/util/List;->contains(Ljava/lang/Object;)Z
++
++    move-result v1
++
++    if-eqz v1, :cond_a
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "Matched OnePlus 8Pro package: "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOP8P:Ljava/util/Map;
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->applyRuleSet(Ljava/util/Map;)Z
++
++    move-result v0
++
++    goto/16 :goto_3
++
++    :cond_a
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeOP9P:[Ljava/lang/String;
++
++    invoke-static {v1}, Ljava/util/Arrays;->asList([Ljava/lang/Object;)Ljava/util/List;
++
++    move-result-object v1
++
++    invoke-interface {v1, p0}, Ljava/util/List;->contains(Ljava/lang/Object;)Z
++
++    move-result v1
++
++    if-eqz v1, :cond_b
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "Matched OnePlus 9Pro package: "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeOP9P:Ljava/util/Map;
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->applyRuleSet(Ljava/util/Map;)Z
++
++    move-result v0
++
++    goto/16 :goto_3
++
++    :cond_b
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeMI11TP:[Ljava/lang/String;
++
++    invoke-static {v1}, Ljava/util/Arrays;->asList([Ljava/lang/Object;)Ljava/util/List;
++
++    move-result-object v1
++
++    invoke-interface {v1, p0}, Ljava/util/List;->contains(Ljava/lang/Object;)Z
++
++    move-result v1
++
++    if-eqz v1, :cond_c
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "Matched Xiaomi MI 11TP package: "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeMI11TP:Ljava/util/Map;
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->applyRuleSet(Ljava/util/Map;)Z
++
++    move-result v0
++
++    goto/16 :goto_3
++
++    :cond_c
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeMI13P:[Ljava/lang/String;
++
++    invoke-static {v1}, Ljava/util/Arrays;->asList([Ljava/lang/Object;)Ljava/util/List;
++
++    move-result-object v1
++
++    invoke-interface {v1, p0}, Ljava/util/List;->contains(Ljava/lang/Object;)Z
++
++    move-result v1
++
++    if-eqz v1, :cond_d
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "Matched Xiaomi MI 13 Pro package: "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeMI13P:Ljava/util/Map;
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->applyRuleSet(Ljava/util/Map;)Z
++
++    move-result v0
++
++    goto/16 :goto_3
++
++    :cond_d
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeF5:[Ljava/lang/String;
++
++    invoke-static {v1}, Ljava/util/Arrays;->asList([Ljava/lang/Object;)Ljava/util/List;
++
++    move-result-object v1
++
++    invoke-interface {v1, p0}, Ljava/util/List;->contains(Ljava/lang/Object;)Z
++
++    move-result v1
++
++    if-eqz v1, :cond_e
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "Matched Xiaomi F5 package: "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeF5:Ljava/util/Map;
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->applyRuleSet(Ljava/util/Map;)Z
++
++    move-result v0
++
++    goto :goto_3
++
++    :cond_e
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeBS4:[Ljava/lang/String;
++
++    invoke-static {v1}, Ljava/util/Arrays;->asList([Ljava/lang/Object;)Ljava/util/List;
++
++    move-result-object v1
++
++    invoke-interface {v1, p0}, Ljava/util/List;->contains(Ljava/lang/Object;)Z
++
++    move-result v1
++
++    if-eqz v1, :cond_f
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "Matched blackshark 2SM-X706B package: "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeBS4:Ljava/util/Map;
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->applyRuleSet(Ljava/util/Map;)Z
++
++    move-result v0
++
++    goto :goto_3
++
++    :cond_f
++    sget-object v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->packagesToChangeS24U:[Ljava/lang/String;
++
++    invoke-static {v1}, Ljava/util/Arrays;->asList([Ljava/lang/Object;)Ljava/util/List;
++
++    move-result-object v1
++
++    invoke-interface {v1, p0}, Ljava/util/List;->contains(Ljava/lang/Object;)Z
++
++    move-result v1
++
++    if-eqz v1, :cond_10
++
++    new-instance v0, Ljava/lang/StringBuilder;
++
++    invoke-direct {v0}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v1, "Matched Samsung S24 Ultra package: "
++
++    invoke-virtual {v0, v1}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v0
++
++    invoke-virtual {v0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->dlog(Ljava/lang/String;)V
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->propsToChangeS24U:Ljava/util/Map;
++
++    invoke-static {v0}, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->applyRuleSet(Ljava/util/Map;)Z
++
++    move-result v0
++
++    :cond_10
++    :goto_3
++    sget-boolean v1, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->DEBUG:Z
++
++    if-eqz v1, :cond_12
++
++    if-nez v0, :cond_11
++
++    sget-object v0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->TAG:Ljava/lang/String;
++
++    new-instance v1, Ljava/lang/StringBuilder;
++
++    invoke-direct {v1}, Ljava/lang/StringBuilder;-><init>()V
++
++    const-string v2, "No spoofing rules matched for: "
++
++    invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object v1
++
++    invoke-virtual {v1, p0}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object p0
++
++    invoke-virtual {p0}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
++
++    move-result-object p0
++
++    invoke-static {v0, p0}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
++
++    :cond_11
++    sget-object p0, Lcom/android/internal/util/oplus/OplusPropsHookUtils;->TAG:Ljava/lang/String;
++
++    const-string v0, "======[Spoof Done]======"
++
++    invoke-static {p0, v0}, Landroid/util/Log;->d(Ljava/lang/String;Ljava/lang/String;)I
++
++    :cond_12
++    return-void
++.end method
+-- 
+2.47.2
+
